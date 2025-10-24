@@ -55,7 +55,7 @@ const NetworkConsole: React.FC<NetworkConsoleProps> = ({ selectedId }) => {
   const activeJointName = useMemo(() => {
     if (!selectedId) return '';
     const node = nodes[selectedId];
-    return node?.joint?.name ?? '';
+    return node?.joints?.[0]?.name ?? '';
   }, [nodes, selectedId]);
 
   const entries = useMemo(() => [...networkLog].reverse(), [networkLog]);

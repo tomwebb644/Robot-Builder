@@ -20,6 +20,8 @@ const InspectorPanel: React.FC = () => {
   const nodes = useSceneStore((state) => state.nodes);
   const updateNode = useSceneStore((state) => state.updateNode);
   const updateJoint = useSceneStore((state) => state.updateJoint);
+  const addJoint = useSceneStore((state) => state.addJoint);
+  const removeJoint = useSceneStore((state) => state.removeJoint);
   const removeLink = useSceneStore((state) => state.removeLink);
   const rootId = useSceneStore((state) => state.rootId);
 
@@ -42,17 +44,29 @@ const InspectorPanel: React.FC = () => {
   };
 
   const onJointTypeChange = (joint: JointDefinition, type: MotionType) => {
+    if (!node) return;
     const nextLimits: [number, number] = type === 'linear' ? [0, 150] : [-180, 180];
-    updateJoint(node!.id, {
+    const nextValue = Math.max(Math.min(joint.currentValue, nextLimits[1]), nextLimits[0]);
+    updateJoint(node.id, joint.id, {
       type,
       limits: nextLimits,
-      currentValue: Math.max(Math.min(joint.currentValue, nextLimits[1]), nextLimits[0])
+      currentValue: nextValue
     });
   };
 
-  const onJointAxisChange = (axis: MotionAxis) => {
-    if (!node?.joint) return;
-    updateJoint(node.id, { axis });
+  const onJointAxisChange = (joint: JointDefinition, axis: MotionAxis) => {
+    if (!node) return;
+    updateJoint(node.id, joint.id, { axis });
+  };
+
+  const onJointPivotChange = (joint: JointDefinition, index: number, value: number) => {
+    if (!node) return;
+    const nextPivot = joint.pivot.map((entry, idx) => (idx === index ? value : entry)) as [
+      number,
+      number,
+      number
+    ];
+    updateJoint(node.id, joint.id, { pivot: nextPivot });
   };
 
   if (!node) {
@@ -266,71 +280,114 @@ const InspectorPanel: React.FC = () => {
           </div>
         </section>
 
-        {node.joint ? (
-          <section>
-            <div className="section-title">Joint</div>
-            <div className="inspector-grid">
-              <label className="full-width">
-                Joint Name
-                <input
-                  type="text"
-                  value={node.joint.name}
-                  onChange={(event) => updateJoint(node.id, { name: event.target.value })}
-                />
-              </label>
-              <label>
-                Type
-                <select
-                  value={node.joint.type}
-                  onChange={(event) => onJointTypeChange(node.joint!, event.target.value as MotionType)}
-                >
-                  <option value="rotational">Rotational</option>
-                  <option value="linear">Linear</option>
-                </select>
-              </label>
-              <label>
-                Axis
-                <select value={node.joint.axis} onChange={(event) => onJointAxisChange(event.target.value as MotionAxis)}>
-                  <option value="x">X</option>
-                  <option value="y">Y</option>
-                  <option value="z">Z</option>
-                </select>
-              </label>
-              <label>
-                Min
-                <NumericInput
-                  step={node.joint.type === 'rotational' ? 1 : 0.5}
-                  value={node.joint.limits[0]}
-                  onValueCommit={(value) =>
-                    updateJoint(node.id, {
-                      limits: [value, node.joint!.limits[1]]
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Max
-                <NumericInput
-                  step={node.joint.type === 'rotational' ? 1 : 0.5}
-                  value={node.joint.limits[1]}
-                  onValueCommit={(value) =>
-                    updateJoint(node.id, {
-                      limits: [node.joint!.limits[0], value]
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Current
-                <NumericInput
-                  step={node.joint.type === 'rotational' ? 1 : 0.5}
-                  value={node.joint.currentValue}
-                  onValueCommit={(value) => updateJoint(node.id, { currentValue: value })}
-                />
-              </label>
-            </div>
-          </section>
-        ) : null}
+        <section>
+          <div className="section-title joint-toolbar">
+            <span>Joints</span>
+            <button type="button" className="ghost" onClick={() => addJoint(node.id)}>
+              Add Joint
+            </button>
+          </div>
+          {node.joints.length === 0 ? (
+            <p className="empty-state">This link has no joints yet.</p>
+          ) : (
+            node.joints.map((joint, index) => (
+              <div key={joint.id} className="joint-block">
+                <div className="joint-header">
+                  <span>
+                    Joint {index + 1}
+                    <span className="joint-name">{joint.name}</span>
+                  </span>
+                  <div className="joint-actions">
+                    <span className="tag subtle">{joint.type}</span>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => removeJoint(node.id, joint.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+                <div className="inspector-grid">
+                  <label className="full-width">
+                    Joint Name
+                    <input
+                      type="text"
+                      value={joint.name}
+                      onChange={(event) => updateJoint(node.id, joint.id, { name: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Type
+                    <select
+                      value={joint.type}
+                      onChange={(event) => onJointTypeChange(joint, event.target.value as MotionType)}
+                    >
+                      <option value="rotational">Rotational</option>
+                      <option value="linear">Linear</option>
+                    </select>
+                  </label>
+                  <label>
+                    Axis
+                    <select
+                      value={joint.axis}
+                      onChange={(event) => onJointAxisChange(joint, event.target.value as MotionAxis)}
+                    >
+                      <option value="x">X</option>
+                      <option value="y">Y</option>
+                      <option value="z">Z</option>
+                    </select>
+                  </label>
+                  <label>
+                    Min
+                    <NumericInput
+                      step={joint.type === 'rotational' ? 1 : 0.5}
+                      value={joint.limits[0]}
+                      onValueCommit={(value) =>
+                        updateJoint(node.id, joint.id, {
+                          limits: [value, joint.limits[1]]
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Max
+                    <NumericInput
+                      step={joint.type === 'rotational' ? 1 : 0.5}
+                      value={joint.limits[1]}
+                      onValueCommit={(value) =>
+                        updateJoint(node.id, joint.id, {
+                          limits: [joint.limits[0], value]
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Current
+                    <NumericInput
+                      step={joint.type === 'rotational' ? 1 : 0.5}
+                      value={joint.currentValue}
+                      onValueCommit={(value) => updateJoint(node.id, joint.id, { currentValue: value })}
+                    />
+                  </label>
+                </div>
+                <div className="inspector-grid pivot-grid">
+                  {['X', 'Y', 'Z'].map((axis, pivotIndex) => (
+                    <label key={`${joint.id}-pivot-${axis}`}>
+                      Pivot {axis} (m)
+                      <NumericInput
+                        step={0.01}
+                        value={joint.pivot[pivotIndex]}
+                        precision={2}
+                        onValueCommit={(value) => onJointPivotChange(joint, pivotIndex, value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </section>
 
         <section>
           <div className="section-title">Notes</div>

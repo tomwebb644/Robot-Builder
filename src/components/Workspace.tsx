@@ -30,24 +30,6 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
   const isSelected = nodeId === selectedId;
   const isConnectTarget = connectMode && connectSourceId && nodeId !== connectSourceId;
 
-  const rotation = useMemo(() => {
-    if (!node.joint || node.joint.type !== 'rotational') {
-      return [0, 0, 0] as [number, number, number];
-    }
-    const radians = THREE.MathUtils.degToRad(node.joint.currentValue);
-    const [x, y, z] = axisToVector(node.joint.axis);
-    return [radians * x, radians * y, radians * z] as [number, number, number];
-  }, [node.joint]);
-
-  const translation = useMemo(() => {
-    if (!node.joint || node.joint.type !== 'linear') {
-      return [0, 0, 0] as [number, number, number];
-    }
-    const vector = axisToVector(node.joint.axis);
-    const scale = node.joint.currentValue / 1000;
-    return [vector[0] * scale, vector[1] * scale, vector[2] * scale] as [number, number, number];
-  }, [node.joint]);
-
   const bounds = useMemo(() => getGeometryBounds(node.geometry), [node.geometry]);
 
   const basePosition = useMemo(() => {
@@ -61,34 +43,38 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
     return node.baseOffset;
   }, [node.baseOffset, node.parentId, bounds.height]);
 
-  const rotationalIndicator = useMemo(() => {
-    if (!node.joint || node.joint.type !== 'rotational') return null;
-    const [min, max] = node.joint.limits;
-    const steps = 48;
-    const radius = bounds.radial * 1.4;
-    const start = THREE.MathUtils.degToRad(min);
-    const end = THREE.MathUtils.degToRad(max);
-    const defaultAxis = new THREE.Vector3(0, 0, 1);
-    const axisVector = new THREE.Vector3(...axisToVector(node.joint.axis)).normalize();
-    const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultAxis, axisVector);
-    const points: THREE.Vector3[] = [];
-    for (let index = 0; index <= steps; index += 1) {
-      const t = index / steps;
-      const angle = start + (end - start) * t;
-      const point = new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
-      points.push(point.applyQuaternion(quaternion));
+  const indicatorData = useMemo(() => {
+    const rotational: Record<string, THREE.Vector3[]> = {};
+    const linear: Record<string, [THREE.Vector3, THREE.Vector3]> = {};
+    const radius = bounds.radial > 0 ? bounds.radial * 1.4 : 0.15;
+    for (const joint of node.joints) {
+      if (joint.type === 'rotational') {
+        const [min, max] = joint.limits;
+        const steps = 48;
+        const start = THREE.MathUtils.degToRad(min);
+        const end = THREE.MathUtils.degToRad(max);
+        const defaultAxis = new THREE.Vector3(0, 0, 1);
+        const axisVector = new THREE.Vector3(...axisToVector(joint.axis)).normalize();
+        const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultAxis, axisVector);
+        const points: THREE.Vector3[] = [];
+        for (let index = 0; index <= steps; index += 1) {
+          const t = index / steps;
+          const angle = start + (end - start) * t;
+          const point = new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+          points.push(point.applyQuaternion(quaternion));
+        }
+        rotational[joint.id] = points;
+      }
+      if (joint.type === 'linear') {
+        const [min, max] = joint.limits;
+        const axisVector = new THREE.Vector3(...axisToVector(joint.axis)).normalize();
+        const start = axisVector.clone().multiplyScalar(min / 1000);
+        const end = axisVector.clone().multiplyScalar(max / 1000);
+        linear[joint.id] = [start, end];
+      }
     }
-    return points;
-  }, [node]);
-
-  const linearIndicator = useMemo(() => {
-    if (!node.joint || node.joint.type !== 'linear') return null;
-    const [min, max] = node.joint.limits;
-    const axisVector = new THREE.Vector3(...axisToVector(node.joint.axis)).normalize();
-    const start = axisVector.clone().multiplyScalar(min / 1000);
-    const end = axisVector.clone().multiplyScalar(max / 1000);
-    return [start, end];
-  }, [node]);
+    return { rotational, linear };
+  }, [node.joints, bounds.radial]);
 
   const handlePointerDown = (event: THREE.Event) => {
     event.stopPropagation();
@@ -128,40 +114,65 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
     }
   }, [node.geometry]);
 
-  const content = (
-    <group position={basePosition}>
-      <group rotation={rotation} position={translation}>
-        <mesh
-          castShadow
-          receiveShadow
-          onPointerDown={handlePointerDown}
-          onPointerOver={handlePointerOver}
-          onPointerOut={handlePointerOut}
-        >
-          {geometryElement}
-          <meshStandardMaterial color={materialColor} emissive={emissive} roughness={0.4} metalness={0.15} />
-        </mesh>
-        {isSelected && rotationalIndicator ? (
-          <Line
-            points={rotationalIndicator}
-            color="#facc15"
-            lineWidth={2}
-            dashed
-            dashScale={2}
-            dashSize={0.12}
-            gapSize={0.08}
-          />
-        ) : null}
-        {isSelected && linearIndicator ? (
-          <Line points={linearIndicator} color="#34d399" lineWidth={2} />
-        ) : null}
-        {node.children.map((child) => (
-          <LinkGroup nodeId={child} key={child} />
-        ))}
-      </group>
-    </group>
+  const baseChildren = (
+    <>
+      <mesh
+        castShadow
+        receiveShadow
+        onPointerDown={handlePointerDown}
+        onPointerOver={handlePointerOver}
+        onPointerOut={handlePointerOut}
+      >
+        {geometryElement}
+        <meshStandardMaterial color={materialColor} emissive={emissive} roughness={0.4} metalness={0.15} />
+      </mesh>
+      {node.children.map((child) => (
+        <LinkGroup nodeId={child} key={child} />
+      ))}
+    </>
   );
-  return content;
+
+  const jointWrapped = node.joints.reduceRight<React.ReactNode>((childContent, joint) => {
+    const pivot = joint.pivot ?? [0, 0, 0];
+    if (joint.type === 'rotational') {
+      const radians = THREE.MathUtils.degToRad(joint.currentValue);
+      const [x, y, z] = axisToVector(joint.axis);
+      const rotation: [number, number, number] = [radians * x, radians * y, radians * z];
+      return (
+        <group key={joint.id} position={pivot}>
+          <group rotation={rotation}>
+            {isSelected && indicatorData.rotational[joint.id] ? (
+              <Line
+                points={indicatorData.rotational[joint.id]}
+                color="#facc15"
+                lineWidth={2}
+                dashed
+                dashScale={2}
+                dashSize={0.12}
+                gapSize={0.08}
+              />
+            ) : null}
+            <group position={[-pivot[0], -pivot[1], -pivot[2]]}>{childContent}</group>
+          </group>
+        </group>
+      );
+    }
+    const axis = axisToVector(joint.axis);
+    const scale = joint.currentValue / 1000;
+    const translation: [number, number, number] = [axis[0] * scale, axis[1] * scale, axis[2] * scale];
+    return (
+      <group key={joint.id} position={pivot}>
+        <group position={translation}>
+          {isSelected && indicatorData.linear[joint.id] ? (
+            <Line points={indicatorData.linear[joint.id]} color="#34d399" lineWidth={2} />
+          ) : null}
+          <group position={[-pivot[0], -pivot[1], -pivot[2]]}>{childContent}</group>
+        </group>
+      </group>
+    );
+  }, baseChildren);
+
+  return <group position={basePosition}>{jointWrapped}</group>;
 };
 
 const RobotScene: React.FC<{ rootId: string }> = ({ rootId }) => {

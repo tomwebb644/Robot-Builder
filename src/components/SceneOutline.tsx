@@ -41,7 +41,9 @@ const SceneOutline: React.FC = () => {
           onClick={() => selectNode(id)}
         >
           <span>{node.name}</span>
-          {node.joint ? <span className="meta">{node.joint.type}</span> : <span className="meta">base</span>}
+          <span className="meta">
+            {node.joints.length > 0 ? `${node.joints.length} joint${node.joints.length > 1 ? 's' : ''}` : 'base'}
+          </span>
         </div>
         {node.children.map((child) => renderNode(child, depth + 1))}
       </React.Fragment>

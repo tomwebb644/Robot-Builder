@@ -15,14 +15,15 @@ const ControlPanel: React.FC = () => {
 
   const joints = useMemo(
     () =>
-      Object.values(nodes)
-        .filter((node) => node.joint)
-        .map((node) => ({
-          id: node.id,
-          label: node.joint!.name,
+      Object.values(nodes).flatMap((node) =>
+        node.joints.map((joint) => ({
+          nodeId: node.id,
+          jointId: joint.id,
+          label: joint.name,
           nodeName: node.name,
-          joint: node.joint!
-        })),
+          joint
+        }))
+      ),
     [nodes]
   );
 
@@ -49,25 +50,31 @@ const ControlPanel: React.FC = () => {
             Add a link to start driving joints in real time.
           </p>
         ) : (
-          joints.map(({ id, label, nodeName, joint }) => {
+          joints.map(({ nodeId, jointId, label, nodeName, joint }) => {
             const [min, max] = joint.limits;
             const neutral = joint.type === 'rotational' ? 0 : (min + max) / 2;
             const applyJointValue = (value: number, source: 'ui' | 'manual' = 'ui') => {
               const clamped = Math.min(Math.max(value, min), max);
-              updateJoint(id, { currentValue: clamped });
+              updateJoint(nodeId, jointId, { currentValue: clamped });
               window.api.sendJointValue({ joint: label, value: clamped });
               logNetworkEvent('outgoing', { [label]: clamped }, source);
             };
             return (
-              <div key={id} className={`slider-item${joint.externalControl ? ' external' : ''}`}>
-                <label htmlFor={`joint-${id}`}>
-                  <span>{nodeName}</span>
+              <div
+                key={`${nodeId}-${jointId}`}
+                className={`slider-item${joint.externalControl ? ' external' : ''}`}
+              >
+                <label htmlFor={`joint-${jointId}`}>
+                  <span>
+                    {nodeName}
+                    <span className="joint-label"> · {label}</span>
+                  </span>
                   <span className="value">
                     {joint.type === 'rotational' ? `${joint.currentValue.toFixed(1)}°` : `${joint.currentValue.toFixed(1)} mm`}
                   </span>
                 </label>
                 <input
-                  id={`joint-${id}`}
+                  id={`joint-${jointId}`}
                   type="range"
                   min={min}
                   max={max}
@@ -91,10 +98,10 @@ const ControlPanel: React.FC = () => {
                   <input
                     type="checkbox"
                     checked={joint.externalControl}
-                    onChange={(event) => toggleExternalControl(id, event.target.checked)}
-                    id={`external-${id}`}
+                    onChange={(event) => toggleExternalControl(nodeId, jointId, event.target.checked)}
+                    id={`external-${jointId}`}
                   />
-                  <label htmlFor={`external-${id}`}>Enable TCP control ({label})</label>
+                  <label htmlFor={`external-${jointId}`}>Enable TCP control ({label})</label>
                 </div>
               </div>
             );

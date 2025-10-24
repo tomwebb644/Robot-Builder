@@ -23,9 +23,9 @@ const StatusBar: React.FC = () => {
         {selectedNode ? (
           <>
             <strong>Selected:</strong> {selectedNode.name}
-            {selectedNode.joint ? (
+            {selectedNode.joints.length > 0 ? (
               <span className="tag dot">
-                {selectedNode.joint.name} · {selectedNode.joint.type}
+                {selectedNode.joints.map((joint) => joint.name).join(', ')}
               </span>
             ) : null}
           </>

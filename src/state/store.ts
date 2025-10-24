@@ -14,12 +14,14 @@ export interface NetworkEvent {
 }
 
 export interface JointDefinition {
+  id: string;
   type: MotionType;
   axis: MotionAxis;
   limits: [number, number];
   currentValue: number;
   name: string;
   externalControl: boolean;
+  pivot: [number, number, number];
 }
 
 export interface BoxGeometry {
@@ -69,7 +71,7 @@ export interface LinkNode {
   parentId?: string;
   children: string[];
   baseOffset: [number, number, number];
-  joint?: JointDefinition;
+  joints: JointDefinition[];
   notes?: string;
 }
 
@@ -95,8 +97,9 @@ const syncCountersFromScene = (scene: SceneData) => {
   let maxValue = idCounter;
   for (const node of Object.values(scene.nodes)) {
     maxValue = Math.max(maxValue, extractNumericSuffix(node.id));
-    if (node.joint) {
-      maxValue = Math.max(maxValue, extractNumericSuffix(node.joint.name));
+    for (const joint of node.joints ?? []) {
+      maxValue = Math.max(maxValue, extractNumericSuffix(joint.name));
+      maxValue = Math.max(maxValue, extractNumericSuffix(joint.id));
     }
   }
   idCounter = Math.max(idCounter, maxValue);
@@ -160,6 +163,11 @@ export const getGeometryBounds = (geometry: MeshGeometry): GeometryBounds => {
   }
 };
 
+export const getDefaultJointPivot = (geometry: MeshGeometry): [number, number, number] => {
+  const bounds = getGeometryBounds(geometry);
+  return [0, -bounds.height / 2, 0];
+};
+
 export interface SceneState {
   nodes: Record<string, LinkNode>;
   rootId: string;
@@ -173,9 +181,11 @@ export interface SceneState {
   simulationTime: number;
   addLink: (kind: MeshKind) => void;
   selectNode: (id?: string) => void;
-  updateJoint: (id: string, patch: Partial<JointDefinition>) => void;
-  updateNode: (id: string, patch: Partial<Omit<LinkNode, 'id' | 'children' | 'joint'>> & { joint?: Partial<JointDefinition> }) => void;
-  toggleExternalControl: (id: string, enabled: boolean) => void;
+  updateJoint: (nodeId: string, jointId: string, patch: Partial<JointDefinition>) => void;
+  addJoint: (nodeId: string, type?: MotionType) => void;
+  removeJoint: (nodeId: string, jointId: string) => void;
+  updateNode: (id: string, patch: Partial<Omit<LinkNode, 'id' | 'children' | 'joints'>>) => void;
+  toggleExternalControl: (nodeId: string, jointId: string, enabled: boolean) => void;
   applyRemoteJointValues: (values: Record<string, number>, source?: NetworkSource) => void;
   exportScene: () => SceneData;
   importScene: (scene: SceneData) => void;
@@ -203,7 +213,8 @@ const createDefaultState = (): Pick<
     geometry: { kind: 'box', width: 0.5, height: 0.2, depth: 0.5 },
     color: '#64748b',
     children: [],
-    baseOffset: [0, 0, 0]
+    baseOffset: [0, 0, 0],
+    joints: []
   };
 
   return {
@@ -249,10 +260,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     const geometry: MeshGeometry = createDefaultGeometry(kind);
 
-    const jointName = createId('joint');
+    const jointId = createId('joint');
     const newId = createId('link');
     const parentHeight = parent.geometry ? getGeometryHeight(parent.geometry) : 0.2;
     const offsetY = parentHeight / 2 + getGeometryHeight(geometry) / 2 + 0.05;
+    const pivot = getDefaultJointPivot(geometry);
 
     const newNode: LinkNode = {
       id: newId,
@@ -271,14 +283,18 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       parentId,
       children: [],
       baseOffset: [0, offsetY, 0],
-      joint: {
-        type: 'rotational',
-        axis: 'z',
-        limits: [-90, 90],
-        currentValue: 0,
-        name: jointName,
-        externalControl: false
-      }
+      joints: [
+        {
+          id: jointId,
+          type: 'rotational',
+          axis: 'z',
+          limits: [-90, 90],
+          currentValue: 0,
+          name: jointId,
+          externalControl: false,
+          pivot
+        }
+      ]
     };
 
     set((state) => ({
@@ -315,25 +331,80 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     }
     set({ selectedId: id });
   },
-  updateJoint: (id, patch) => {
+  updateJoint: (nodeId, jointId, patch) => {
     set((state) => {
-      const node = state.nodes[id];
-      if (!node || !node.joint) return state;
-      const limits = patch.limits ?? node.joint.limits;
-      const normalizedLimits: [number, number] = limits[0] <= limits[1] ? [limits[0], limits[1]] : [limits[1], limits[0]];
-      const valueToClamp = patch.currentValue !== undefined ? patch.currentValue : node.joint.currentValue;
+      const node = state.nodes[nodeId];
+      if (!node) return state;
+      const index = node.joints.findIndex((joint) => joint.id === jointId);
+      if (index === -1) return state;
+      const currentJoint = node.joints[index];
+      const limits = patch.limits ?? currentJoint.limits;
+      const normalizedLimits: [number, number] =
+        limits[0] <= limits[1] ? [limits[0], limits[1]] : [limits[1], limits[0]];
+      const valueToClamp =
+        patch.currentValue !== undefined ? patch.currentValue : currentJoint.currentValue;
       const newValue = Math.min(Math.max(valueToClamp, normalizedLimits[0]), normalizedLimits[1]);
+      const nextJoint: JointDefinition = {
+        ...currentJoint,
+        ...patch,
+        limits: normalizedLimits,
+        currentValue: newValue,
+        pivot: patch.pivot ?? currentJoint.pivot
+      };
+      const joints = [...node.joints];
+      joints[index] = nextJoint;
       return {
         nodes: {
           ...state.nodes,
-          [id]: {
+          [nodeId]: {
             ...node,
-            joint: {
-              ...node.joint,
-              ...patch,
-              limits: normalizedLimits,
-              currentValue: newValue
-            }
+            joints
+          }
+        }
+      };
+    });
+  },
+  addJoint: (nodeId, type = 'rotational') => {
+    set((state) => {
+      const node = state.nodes[nodeId];
+      if (!node) return state;
+      const jointId = createId('joint');
+      const pivot = getDefaultJointPivot(node.geometry);
+      const limits: [number, number] = type === 'linear' ? [0, 150] : [-90, 90];
+      const nextJoint: JointDefinition = {
+        id: jointId,
+        type,
+        axis: 'z',
+        limits,
+        currentValue: type === 'linear' ? limits[0] : 0,
+        name: jointId,
+        externalControl: false,
+        pivot
+      };
+      return {
+        nodes: {
+          ...state.nodes,
+          [nodeId]: {
+            ...node,
+            joints: [...node.joints, nextJoint]
+          }
+        },
+        selectedId: nodeId
+      };
+    });
+  },
+  removeJoint: (nodeId, jointId) => {
+    set((state) => {
+      const node = state.nodes[nodeId];
+      if (!node) return state;
+      const nextJoints = node.joints.filter((joint) => joint.id !== jointId);
+      if (nextJoints.length === node.joints.length) return state;
+      return {
+        nodes: {
+          ...state.nodes,
+          [nodeId]: {
+            ...node,
+            joints: nextJoints
           }
         }
       };
@@ -353,12 +424,17 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           ...node.geometry,
           ...patch.geometry
         } as MeshGeometry;
-      }
-      if (patch.joint && node.joint) {
-        nextNode.joint = {
-          ...node.joint,
-          ...patch.joint
-        };
+        const previousDefaultPivot = getDefaultJointPivot(node.geometry);
+        const nextDefaultPivot = getDefaultJointPivot(nextNode.geometry);
+        nextNode.joints = node.joints.map((joint) => {
+          const matchesDefaultPivot =
+            Math.abs(joint.pivot[0] - previousDefaultPivot[0]) < 1e-6 &&
+            Math.abs(joint.pivot[1] - previousDefaultPivot[1]) < 1e-6 &&
+            Math.abs(joint.pivot[2] - previousDefaultPivot[2]) < 1e-6;
+          return matchesDefaultPivot
+            ? { ...joint, pivot: nextDefaultPivot }
+            : joint;
+        });
       }
       const updatedNodes: Record<string, LinkNode> = {
         ...state.nodes,
@@ -380,19 +456,23 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       };
     });
   },
-  toggleExternalControl: (id, enabled) => {
+  toggleExternalControl: (nodeId, jointId, enabled) => {
     set((state) => {
-      const node = state.nodes[id];
-      if (!node?.joint) return state;
+      const node = state.nodes[nodeId];
+      if (!node) return state;
+      const index = node.joints.findIndex((joint) => joint.id === jointId);
+      if (index === -1) return state;
+      const joints = [...node.joints];
+      joints[index] = {
+        ...joints[index],
+        externalControl: enabled
+      };
       return {
         nodes: {
           ...state.nodes,
-          [id]: {
+          [nodeId]: {
             ...node,
-            joint: {
-              ...node.joint,
-              externalControl: enabled
-            }
+            joints
           }
         }
       };
@@ -404,23 +484,35 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const updated: Record<string, LinkNode> = { ...state.nodes };
       let changed = false;
       for (const node of Object.values(state.nodes)) {
-        if (!node.joint) continue;
-        const key = node.joint.name;
-        if (!node.joint.externalControl && source === 'tcp') continue;
-        const nextValue = values[key];
-        if (typeof nextValue !== 'number') continue;
-        const [min, max] = node.joint.limits;
-        const clamped = Math.min(Math.max(nextValue, min), max);
-        if (clamped !== node.joint.currentValue) {
+        if (!node.joints || node.joints.length === 0) continue;
+        let nodeChanged = false;
+        const joints = node.joints.map((joint) => {
+          const key = joint.name;
+          if (source === 'tcp' && !joint.externalControl) {
+            return joint;
+          }
+          const nextValue = values[key];
+          if (typeof nextValue !== 'number') {
+            return joint;
+          }
+          const [min, max] = joint.limits;
+          const clamped = Math.min(Math.max(nextValue, min), max);
+          if (clamped !== joint.currentValue) {
+            nodeChanged = true;
+            changedValues[key] = clamped;
+            return {
+              ...joint,
+              currentValue: clamped
+            };
+          }
+          return joint;
+        });
+        if (nodeChanged) {
           updated[node.id] = {
             ...node,
-            joint: {
-              ...node.joint,
-              currentValue: clamped
-            }
+            joints
           };
           changed = true;
-          changedValues[key] = clamped;
         }
       }
       return changed ? { nodes: updated } : state;
@@ -437,11 +529,68 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     };
   },
   importScene: (scene) => {
-    syncCountersFromScene(scene);
+    const normalizedNodes: Record<string, LinkNode> = {};
+    for (const [id, rawNode] of Object.entries(scene.nodes)) {
+      const geometry = rawNode.geometry;
+      const defaultPivot = getDefaultJointPivot(geometry);
+      const rawJoints: any[] = Array.isArray((rawNode as any).joints)
+        ? ((rawNode as any).joints as any[])
+        : (rawNode as any).joint
+        ? [((rawNode as any).joint as any)]
+        : [];
+      const joints: JointDefinition[] = rawJoints.map((entry: any) => {
+        const type: MotionType = entry?.type === 'linear' ? 'linear' : 'rotational';
+        const axis: MotionAxis = entry?.axis === 'x' || entry?.axis === 'y' || entry?.axis === 'z' ? entry.axis : 'z';
+        const limitsInput = Array.isArray(entry?.limits) && entry.limits.length >= 2 ? entry.limits : type === 'linear' ? [0, 150] : [-90, 90];
+        const limits = [Number(limitsInput[0]), Number(limitsInput[1])] as [number, number];
+        const normalizedLimits: [number, number] =
+          limits[0] <= limits[1] ? [limits[0], limits[1]] : [limits[1], limits[0]];
+        const rawValue = Number(entry?.currentValue ?? (type === 'linear' ? normalizedLimits[0] : 0));
+        const currentValue = Math.min(Math.max(rawValue, normalizedLimits[0]), normalizedLimits[1]);
+        const pivotSource = Array.isArray(entry?.pivot) && entry.pivot.length === 3 ? entry.pivot : defaultPivot;
+        const pivot = [Number(pivotSource[0]), Number(pivotSource[1]), Number(pivotSource[2])] as [
+          number,
+          number,
+          number
+        ];
+        const jointId = typeof entry?.id === 'string' && entry.id.trim() ? entry.id : createId('joint');
+        const name = typeof entry?.name === 'string' && entry.name.trim() ? entry.name : jointId;
+        return {
+          id: jointId,
+          name,
+          type,
+          axis,
+          limits: normalizedLimits,
+          currentValue,
+          externalControl: Boolean(entry?.externalControl),
+          pivot
+        };
+      });
+      normalizedNodes[id] = {
+        id: rawNode.id ?? id,
+        name: rawNode.name ?? id,
+        geometry,
+        color: rawNode.color ?? randomColor(),
+        parentId: rawNode.parentId,
+        children: Array.isArray(rawNode.children) ? rawNode.children : [],
+        baseOffset:
+          Array.isArray(rawNode.baseOffset) && rawNode.baseOffset.length === 3
+            ? [
+                Number(rawNode.baseOffset[0]),
+                Number(rawNode.baseOffset[1]),
+                Number(rawNode.baseOffset[2])
+              ]
+            : [0, 0, 0],
+        joints,
+        notes: rawNode.notes
+      };
+    }
+    const normalizedScene: SceneData = { ...scene, nodes: normalizedNodes };
+    syncCountersFromScene(normalizedScene);
     set(() => ({
-      nodes: scene.nodes,
-      rootId: scene.rootId,
-      selectedId: scene.rootId
+      nodes: normalizedNodes,
+      rootId: normalizedScene.rootId,
+      selectedId: normalizedScene.rootId
     }));
   },
   updateFps: (fps) => set({ fps }),
@@ -553,28 +702,40 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const nextTime = state.simulationTime + delta;
       const logThresholdCrossed = Math.floor(nextTime * 2) !== Math.floor(state.simulationTime * 2);
       for (const node of Object.values(state.nodes)) {
-        if (!node.joint || node.joint.externalControl) continue;
-        const joint = node.joint;
-        const [min, max] = joint.limits;
-        const amplitude = (max - min) / 2;
-        if (amplitude <= 0) continue;
-        const center = (max + min) / 2;
-        const frequency = 0.6 + jointIndex * 0.15;
-        const phase = state.simulationTime * frequency;
-        const value = center + amplitude * Math.sin(phase + jointIndex);
-        const rounded = Number(value.toFixed(3));
-        if (Math.abs(rounded - joint.currentValue) > 0.001) {
-          updatedNodes[node.id] = {
-            ...node,
-            joint: {
+        if (!node.joints || node.joints.length === 0) continue;
+        const joints = [...node.joints];
+        let nodeChanged = false;
+        for (let idx = 0; idx < joints.length; idx += 1) {
+          const joint = joints[idx];
+          if (joint.externalControl) continue;
+          const [min, max] = joint.limits;
+          const amplitude = (max - min) / 2;
+          if (amplitude <= 0) {
+            jointIndex += 1;
+            continue;
+          }
+          const center = (max + min) / 2;
+          const frequency = 0.6 + jointIndex * 0.15;
+          const phase = state.simulationTime * frequency;
+          const value = center + amplitude * Math.sin(phase + jointIndex);
+          const rounded = Number(value.toFixed(3));
+          if (Math.abs(rounded - joint.currentValue) > 0.001) {
+            joints[idx] = {
               ...joint,
               currentValue: Math.min(Math.max(rounded, min), max)
-            }
-          };
-          changes[joint.name] = Math.min(Math.max(rounded, min), max);
-          changed = true;
+            };
+            changes[joint.name] = Math.min(Math.max(rounded, min), max);
+            nodeChanged = true;
+            changed = true;
+          }
+          jointIndex += 1;
         }
-        jointIndex += 1;
+        if (nodeChanged) {
+          updatedNodes[node.id] = {
+            ...node,
+            joints
+          };
+        }
       }
       if (!changed) {
         return {
