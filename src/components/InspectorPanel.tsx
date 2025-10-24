@@ -1,4 +1,4 @@
-import React, { ChangeEvent } from 'react';
+import React from 'react';
 import { useSceneStore } from '@state/store';
 import type {
   JointDefinition,
@@ -6,8 +6,14 @@ import type {
   BoxGeometry,
   CylinderGeometry,
   MotionAxis,
-  MotionType
+  MotionType,
+  MeshKind,
+  SphereGeometry,
+  ConeGeometry,
+  CapsuleGeometry
 } from '@state/store';
+import { createDefaultGeometry } from '@state/store';
+import NumericInput from './NumericInput';
 
 const InspectorPanel: React.FC = () => {
   const selectedId = useSceneStore((state) => state.selectedId);
@@ -24,12 +30,15 @@ const InspectorPanel: React.FC = () => {
     updateNode(node.id, { geometry });
   };
 
-  const onBaseOffsetChange = (index: number, event: ChangeEvent<HTMLInputElement>) => {
+  const onGeometryKindChange = (kind: MeshKind) => {
     if (!node) return;
-    const value = Number(event.target.value);
-    const nextOffset = [...node.baseOffset] as [number, number, number];
-    nextOffset[index] = Number.isNaN(value) ? 0 : value;
-    updateNode(node.id, { baseOffset: nextOffset });
+    const defaults = createDefaultGeometry(kind);
+    const preserved = node.geometry;
+    let nextGeometry: MeshGeometry = defaults;
+    if (preserved.kind === kind) {
+      nextGeometry = preserved;
+    }
+    updateNode(node.id, { geometry: nextGeometry });
   };
 
   const onJointTypeChange = (joint: JointDefinition, type: MotionType) => {
@@ -64,34 +73,34 @@ const InspectorPanel: React.FC = () => {
         <>
           <label>
             Width (m)
-            <input
-              type="number"
-              step={0.05}
+            <NumericInput
+              step={0.01}
               value={box.width}
-              onChange={(event) =>
-                onGeometryChange({ kind: 'box', width: Number(event.target.value), height: box.height, depth: box.depth })
+              precision={2}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'box', width: value, height: box.height, depth: box.depth })
               }
             />
           </label>
           <label>
             Height (m)
-            <input
-              type="number"
-              step={0.05}
+            <NumericInput
+              step={0.01}
               value={box.height}
-              onChange={(event) =>
-                onGeometryChange({ kind: 'box', width: box.width, height: Number(event.target.value), depth: box.depth })
+              precision={2}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'box', width: box.width, height: value, depth: box.depth })
               }
             />
           </label>
           <label>
             Depth (m)
-            <input
-              type="number"
-              step={0.05}
+            <NumericInput
+              step={0.01}
               value={box.depth}
-              onChange={(event) =>
-                onGeometryChange({ kind: 'box', width: box.width, height: box.height, depth: Number(event.target.value) })
+              precision={2}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'box', width: box.width, height: box.height, depth: value })
               }
             />
           </label>
@@ -99,29 +108,96 @@ const InspectorPanel: React.FC = () => {
       );
     }
 
-    const cylinder = geometry as CylinderGeometry;
+    if (geometry.kind === 'cylinder') {
+      const cylinder = geometry as CylinderGeometry;
+      return (
+        <>
+          <label>
+            Radius (m)
+            <NumericInput
+              step={0.005}
+              value={cylinder.radius}
+              precision={3}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'cylinder', radius: value, height: cylinder.height })
+              }
+            />
+          </label>
+          <label>
+            Height (m)
+            <NumericInput
+              step={0.01}
+              value={cylinder.height}
+              precision={2}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'cylinder', radius: cylinder.radius, height: value })
+              }
+            />
+          </label>
+        </>
+      );
+    }
+
+    if (geometry.kind === 'sphere') {
+      const sphere = geometry as SphereGeometry;
+      return (
+        <label className="full-width">
+          Radius (m)
+          <NumericInput
+            step={0.005}
+            value={sphere.radius}
+            precision={3}
+            onValueCommit={(value) => onGeometryChange({ kind: 'sphere', radius: value })}
+          />
+        </label>
+      );
+    }
+
+    if (geometry.kind === 'cone') {
+      const cone = geometry as ConeGeometry;
+      return (
+        <>
+          <label>
+            Base Radius (m)
+            <NumericInput
+              step={0.005}
+              value={cone.radius}
+              precision={3}
+              onValueCommit={(value) => onGeometryChange({ kind: 'cone', radius: value, height: cone.height })}
+            />
+          </label>
+          <label>
+            Height (m)
+            <NumericInput
+              step={0.01}
+              value={cone.height}
+              precision={2}
+              onValueCommit={(value) => onGeometryChange({ kind: 'cone', radius: cone.radius, height: value })}
+            />
+          </label>
+        </>
+      );
+    }
+
+    const capsule = geometry as CapsuleGeometry;
     return (
       <>
         <label>
           Radius (m)
-          <input
-            type="number"
-            step={0.025}
-            value={cylinder.radius}
-            onChange={(event) =>
-              onGeometryChange({ kind: 'cylinder', radius: Number(event.target.value), height: cylinder.height })
-            }
+          <NumericInput
+            step={0.005}
+            value={capsule.radius}
+            precision={3}
+            onValueCommit={(value) => onGeometryChange({ kind: 'capsule', radius: value, length: capsule.length })}
           />
         </label>
         <label>
-          Height (m)
-          <input
-            type="number"
-            step={0.05}
-            value={cylinder.height}
-            onChange={(event) =>
-              onGeometryChange({ kind: 'cylinder', radius: cylinder.radius, height: Number(event.target.value) })
-            }
+          Body Length (m)
+          <NumericInput
+            step={0.01}
+            value={capsule.length}
+            precision={2}
+            onValueCommit={(value) => onGeometryChange({ kind: 'capsule', radius: capsule.radius, length: value })}
           />
         </label>
       </>
@@ -144,6 +220,16 @@ const InspectorPanel: React.FC = () => {
               />
             </label>
             <label>
+              Shape
+              <select value={node.geometry.kind} onChange={(event) => onGeometryKindChange(event.target.value as MeshKind)}>
+                <option value="box">Cuboid</option>
+                <option value="cylinder">Cylinder</option>
+                <option value="sphere">Sphere</option>
+                <option value="cone">Cone</option>
+                <option value="capsule">Capsule</option>
+              </select>
+            </label>
+            <label>
               Color
               <input
                 type="color"
@@ -161,11 +247,19 @@ const InspectorPanel: React.FC = () => {
             {['X', 'Y', 'Z'].map((axis, index) => (
               <label key={axis}>
                 {axis} (m)
-                <input
-                  type="number"
-                  step={0.05}
+                <NumericInput
+                  step={0.01}
                   value={node.baseOffset[index]}
-                  onChange={(event) => onBaseOffsetChange(index, event)}
+                  precision={2}
+                  onValueCommit={(value) =>
+                    updateNode(node.id, {
+                      baseOffset: node.baseOffset.map((offset, idx) => (idx === index ? value : offset)) as [
+                        number,
+                        number,
+                        number
+                      ]
+                    })
+                  }
                 />
               </label>
             ))}
@@ -204,37 +298,34 @@ const InspectorPanel: React.FC = () => {
               </label>
               <label>
                 Min
-                <input
-                  type="number"
-                  step={1}
+                <NumericInput
+                  step={node.joint.type === 'rotational' ? 1 : 0.5}
                   value={node.joint.limits[0]}
-                  onChange={(event) =>
+                  onValueCommit={(value) =>
                     updateJoint(node.id, {
-                      limits: [Number(event.target.value), node.joint!.limits[1]]
+                      limits: [value, node.joint!.limits[1]]
                     })
                   }
                 />
               </label>
               <label>
                 Max
-                <input
-                  type="number"
-                  step={1}
+                <NumericInput
+                  step={node.joint.type === 'rotational' ? 1 : 0.5}
                   value={node.joint.limits[1]}
-                  onChange={(event) =>
+                  onValueCommit={(value) =>
                     updateJoint(node.id, {
-                      limits: [node.joint!.limits[0], Number(event.target.value)]
+                      limits: [node.joint!.limits[0], value]
                     })
                   }
                 />
               </label>
               <label>
                 Current
-                <input
-                  type="number"
+                <NumericInput
                   step={node.joint.type === 'rotational' ? 1 : 0.5}
                   value={node.joint.currentValue}
-                  onChange={(event) => updateJoint(node.id, { currentValue: Number(event.target.value) })}
+                  onValueCommit={(value) => updateJoint(node.id, { currentValue: value })}
                 />
               </label>
             </div>

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSceneStore } from '@state/store';
-import type { SceneData } from '@state/store';
+import type { SceneData, MeshKind } from '@state/store';
 
 const Toolbar: React.FC = () => {
   const addLink = useSceneStore((state) => state.addLink);
@@ -13,6 +13,7 @@ const Toolbar: React.FC = () => {
   const selectedId = useSceneStore((state) => state.selectedId);
   const setSimulationPlaying = useSceneStore((state) => state.setSimulationPlaying);
   const simulationPlaying = useSceneStore((state) => state.simulationPlaying);
+  const [pendingKind, setPendingKind] = useState<MeshKind>('box');
 
   const handleSave = async () => {
     const scene = exportScene();
@@ -51,11 +52,18 @@ const Toolbar: React.FC = () => {
 
   return (
     <div className="toolbar">
-      <button type="button" onClick={() => addLink('box')}>
-        Add Cuboid
-      </button>
-      <button type="button" onClick={() => addLink('cylinder')}>
-        Add Cylinder
+      <label className="shape-selector">
+        <span>Shape</span>
+        <select value={pendingKind} onChange={(event) => setPendingKind(event.target.value as MeshKind)}>
+          <option value="box">Cuboid</option>
+          <option value="cylinder">Cylinder</option>
+          <option value="sphere">Sphere</option>
+          <option value="cone">Cone</option>
+          <option value="capsule">Capsule</option>
+        </select>
+      </label>
+      <button type="button" onClick={() => addLink(pendingKind)}>
+        Add Link
       </button>
       <button
         type="button"

@@ -51,6 +51,13 @@ const ControlPanel: React.FC = () => {
         ) : (
           joints.map(({ id, label, nodeName, joint }) => {
             const [min, max] = joint.limits;
+            const neutral = joint.type === 'rotational' ? 0 : (min + max) / 2;
+            const applyJointValue = (value: number, source: 'ui' | 'manual' = 'ui') => {
+              const clamped = Math.min(Math.max(value, min), max);
+              updateJoint(id, { currentValue: clamped });
+              window.api.sendJointValue({ joint: label, value: clamped });
+              logNetworkEvent('outgoing', { [label]: clamped }, source);
+            };
             return (
               <div key={id} className={`slider-item${joint.externalControl ? ' external' : ''}`}>
                 <label htmlFor={`joint-${id}`}>
@@ -67,13 +74,19 @@ const ControlPanel: React.FC = () => {
                   step={joint.type === 'rotational' ? 1 : 0.5}
                   value={joint.currentValue}
                   disabled={joint.externalControl}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    updateJoint(id, { currentValue: value });
-                    window.api.sendJointValue({ joint: label, value });
-                    logNetworkEvent('outgoing', { [label]: value }, 'ui');
-                  }}
+                  onChange={(event) => applyJointValue(Number(event.target.value))}
                 />
+                <div className="slider-actions">
+                  <button type="button" onClick={() => applyJointValue(min, 'manual')} disabled={joint.externalControl}>
+                    Min
+                  </button>
+                  <button type="button" onClick={() => applyJointValue(neutral, 'manual')} disabled={joint.externalControl}>
+                    Reset
+                  </button>
+                  <button type="button" onClick={() => applyJointValue(max, 'manual')} disabled={joint.externalControl}>
+                    Max
+                  </button>
+                </div>
                 <div className="checkbox-row">
                   <input
                     type="checkbox"

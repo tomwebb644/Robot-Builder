@@ -40,6 +40,34 @@ textarea {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
+.shape-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: rgba(226, 232, 255, 0.8);
+  background: rgba(21, 26, 36, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+}
+
+.shape-selector span {
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.shape-selector select {
+  background: transparent;
+  border: none;
+  color: #f8fafc;
+  font-size: 0.85rem;
+}
+
+.shape-selector select:focus {
+  outline: none;
+}
+
 .toolbar button {
   background: linear-gradient(145deg, #1f2534, #161b25);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -153,6 +181,34 @@ textarea {
 
 .slider-item input[type='range'] {
   width: 100%;
+}
+
+.slider-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0.4rem 0 0.2rem;
+}
+
+.slider-actions button {
+  flex: 1;
+  background: rgba(24, 31, 45, 0.9);
+  color: rgba(191, 219, 254, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 4px;
+  padding: 0.25rem 0.35rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.slider-actions button:hover {
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
+}
+
+.slider-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .slider-item .value {

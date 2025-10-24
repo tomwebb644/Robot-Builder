@@ -1,9 +1,10 @@
-import React, { Suspense, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Grid, TransformControls, Line } from '@react-three/drei';
+import { OrbitControls, Grid, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { useSceneStore } from '@state/store';
-import type { MotionAxis } from '@state/store';
+import type { MotionAxis, MeshGeometry } from '@state/store';
+import { getGeometryBounds } from '@state/store';
 
 const axisToVector = (axis: MotionAxis): [number, number, number] => {
   switch (axis) {
@@ -17,30 +18,17 @@ const axisToVector = (axis: MotionAxis): [number, number, number] => {
   }
 };
 
-const OrbitContext = React.createContext<{ setOrbitEnabled: (enabled: boolean) => void }>({
-  setOrbitEnabled: () => {}
-});
-
 const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
   const node = useSceneStore((state) => state.nodes[nodeId]);
   const selectNode = useSceneStore((state) => state.selectNode);
   const selectedId = useSceneStore((state) => state.selectedId);
-  const updateNode = useSceneStore((state) => state.updateNode);
   const connectMode = useSceneStore((state) => state.connectMode);
   const connectSourceId = useSceneStore((state) => state.connectSourceId);
-  const { setOrbitEnabled } = useContext(OrbitContext);
-  const groupRef = useRef<THREE.Group>(null);
 
   if (!node) return null;
 
   const isSelected = nodeId === selectedId;
   const isConnectTarget = connectMode && connectSourceId && nodeId !== connectSourceId;
-
-  useEffect(() => {
-    return () => {
-      setOrbitEnabled(true);
-    };
-  }, [setOrbitEnabled]);
 
   const rotation = useMemo(() => {
     if (!node.joint || node.joint.type !== 'rotational') {
@@ -60,25 +48,24 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
     return [vector[0] * scale, vector[1] * scale, vector[2] * scale] as [number, number, number];
   }, [node.joint]);
 
+  const bounds = useMemo(() => getGeometryBounds(node.geometry), [node.geometry]);
+
   const basePosition = useMemo(() => {
     if (!node.parentId) {
-      return [node.baseOffset[0], node.geometry.height / 2 + node.baseOffset[1], node.baseOffset[2]] as [
+      return [node.baseOffset[0], bounds.height / 2 + node.baseOffset[1], node.baseOffset[2]] as [
         number,
         number,
         number
       ];
     }
     return node.baseOffset;
-  }, [node.baseOffset, node.geometry.height, node.parentId]);
+  }, [node.baseOffset, node.parentId, bounds.height]);
 
   const rotationalIndicator = useMemo(() => {
     if (!node.joint || node.joint.type !== 'rotational') return null;
     const [min, max] = node.joint.limits;
     const steps = 48;
-    const radius =
-      node.geometry.kind === 'cylinder'
-        ? (node.geometry as { radius: number }).radius * 1.4
-        : Math.max((node.geometry as { width: number }).width, (node.geometry as { depth: number }).depth) * 0.6;
+    const radius = bounds.radial * 1.4;
     const start = THREE.MathUtils.degToRad(min);
     const end = THREE.MathUtils.degToRad(max);
     const defaultAxis = new THREE.Vector3(0, 0, 1);
@@ -123,35 +110,26 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
     : node.color;
   const emissive = isSelected ? node.color : isConnectTarget ? '#6366f1' : '#000000';
 
-  const geometryElement =
-    node.geometry.kind === 'box' ? (
-      <boxGeometry args={[node.geometry.width, node.geometry.height, node.geometry.depth]} />
-    ) : (
-      <cylinderGeometry args={[node.geometry.radius, node.geometry.radius, node.geometry.height, 32]} />
-    );
-
-  const handleObjectChange = () => {
-    if (!groupRef.current) return;
-    const { x, y, z } = groupRef.current.position;
-    const rounded = (value: number) => Number(value.toFixed(3));
-    const nextBaseOffset: [number, number, number] = node.parentId
-      ? [rounded(x), rounded(y), rounded(z)]
-      : [rounded(x), rounded(y - node.geometry.height / 2), rounded(z)];
-    const current = node.parentId
-      ? node.baseOffset
-      : [node.baseOffset[0], node.baseOffset[1], node.baseOffset[2]];
-    if (
-      Math.abs(nextBaseOffset[0] - current[0]) < 0.001 &&
-      Math.abs(nextBaseOffset[1] - current[1]) < 0.001 &&
-      Math.abs(nextBaseOffset[2] - current[2]) < 0.001
-    ) {
-      return;
+  const geometryElement = useMemo(() => {
+    const geometry: MeshGeometry = node.geometry;
+    switch (geometry.kind) {
+      case 'box':
+        return <boxGeometry args={[geometry.width, geometry.height, geometry.depth]} />;
+      case 'cylinder':
+        return <cylinderGeometry args={[geometry.radius, geometry.radius, geometry.height, 32]} />;
+      case 'sphere':
+        return <sphereGeometry args={[geometry.radius, 32, 32]} />;
+      case 'cone':
+        return <coneGeometry args={[geometry.radius, geometry.height, 32]} />;
+      case 'capsule':
+        return <capsuleGeometry args={[geometry.radius, geometry.length, 8, 16]} />;
+      default:
+        return null;
     }
-    updateNode(node.id, { baseOffset: nextBaseOffset });
-  };
+  }, [node.geometry]);
 
   const content = (
-    <group ref={groupRef} position={basePosition}>
+    <group position={basePosition}>
       <group rotation={rotation} position={translation}>
         <mesh
           castShadow
@@ -183,23 +161,6 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
       </group>
     </group>
   );
-
-  if (isSelected) {
-    return (
-      <TransformControls
-        mode="translate"
-        translationSnap={0.05}
-        onMouseDown={() => setOrbitEnabled(false)}
-        onMouseUp={() => setOrbitEnabled(true)}
-        onTouchStart={() => setOrbitEnabled(false)}
-        onTouchEnd={() => setOrbitEnabled(true)}
-        onObjectChange={handleObjectChange}
-      >
-        {content}
-      </TransformControls>
-    );
-  }
-
   return content;
 };
 
@@ -229,7 +190,6 @@ const RobotScene: React.FC<{ rootId: string }> = ({ rootId }) => {
 
 const Workspace: React.FC = () => {
   const rootId = useSceneStore((state) => state.rootId);
-  const [orbitEnabled, setOrbitEnabled] = useState(true);
 
   useEffect(() => {
     document.body.style.cursor = 'default';
@@ -242,9 +202,7 @@ const Workspace: React.FC = () => {
         <ambientLight intensity={0.35} />
         <directionalLight position={[5, 6, 3]} intensity={1.1} castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048} />
         <Suspense fallback={null}>
-          <OrbitContext.Provider value={{ setOrbitEnabled }}>
-            <RobotScene rootId={rootId} />
-          </OrbitContext.Provider>
+          <RobotScene rootId={rootId} />
         </Suspense>
         <Grid
           infiniteGrid
@@ -254,7 +212,7 @@ const Workspace: React.FC = () => {
           cellThickness={0.15}
           position={[0, 0, 0]}
         />
-        <OrbitControls makeDefault enablePan enableDamping dampingFactor={0.08} enabled={orbitEnabled} />
+        <OrbitControls makeDefault enablePan enableDamping dampingFactor={0.08} />
       </Canvas>
     </div>
   );

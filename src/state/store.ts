@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 export type MotionType = 'rotational' | 'linear';
 export type MotionAxis = 'x' | 'y' | 'z';
-export type MeshKind = 'box' | 'cylinder';
+export type MeshKind = 'box' | 'cylinder' | 'sphere' | 'cone' | 'capsule';
 export type NetworkSource = 'tcp' | 'ui' | 'manual' | 'simulation';
 
 export interface NetworkEvent {
@@ -35,7 +35,31 @@ export interface CylinderGeometry {
   height: number;
 }
 
-export type MeshGeometry = BoxGeometry | CylinderGeometry;
+export interface SphereGeometry {
+  kind: 'sphere';
+  radius: number;
+}
+
+export interface ConeGeometry {
+  kind: 'cone';
+  radius: number;
+  height: number;
+}
+
+export interface CapsuleGeometry {
+  kind: 'capsule';
+  radius: number;
+  length: number;
+}
+
+export type MeshGeometry = BoxGeometry | CylinderGeometry | SphereGeometry | ConeGeometry | CapsuleGeometry;
+
+export interface GeometryBounds {
+  width: number;
+  depth: number;
+  height: number;
+  radial: number;
+}
 
 export interface LinkNode {
   id: string;
@@ -80,6 +104,61 @@ const syncCountersFromScene = (scene: SceneData) => {
 
 const defaultBox = (): BoxGeometry => ({ kind: 'box', width: 0.3, height: 0.4, depth: 0.3 });
 const defaultCylinder = (): CylinderGeometry => ({ kind: 'cylinder', radius: 0.15, height: 0.4 });
+const defaultSphere = (): SphereGeometry => ({ kind: 'sphere', radius: 0.18 });
+const defaultCone = (): ConeGeometry => ({ kind: 'cone', radius: 0.16, height: 0.38 });
+const defaultCapsule = (): CapsuleGeometry => ({ kind: 'capsule', radius: 0.12, length: 0.28 });
+
+const geometryFactory: Record<MeshKind, () => MeshGeometry> = {
+  box: defaultBox,
+  cylinder: defaultCylinder,
+  sphere: defaultSphere,
+  cone: defaultCone,
+  capsule: defaultCapsule
+};
+
+export const createDefaultGeometry = (kind: MeshKind): MeshGeometry => geometryFactory[kind]();
+
+export const getGeometryBounds = (geometry: MeshGeometry): GeometryBounds => {
+  switch (geometry.kind) {
+    case 'box':
+      return {
+        width: geometry.width,
+        depth: geometry.depth,
+        height: geometry.height,
+        radial: Math.max(geometry.width, geometry.depth) / 2
+      };
+    case 'cylinder':
+      return {
+        width: geometry.radius * 2,
+        depth: geometry.radius * 2,
+        height: geometry.height,
+        radial: geometry.radius
+      };
+    case 'sphere':
+      return {
+        width: geometry.radius * 2,
+        depth: geometry.radius * 2,
+        height: geometry.radius * 2,
+        radial: geometry.radius
+      };
+    case 'cone':
+      return {
+        width: geometry.radius * 2,
+        depth: geometry.radius * 2,
+        height: geometry.height,
+        radial: geometry.radius
+      };
+    case 'capsule':
+      return {
+        width: geometry.radius * 2,
+        depth: geometry.radius * 2,
+        height: geometry.length + geometry.radius * 2,
+        radial: geometry.radius
+      };
+    default:
+      return { width: 0.3, depth: 0.3, height: 0.3, radial: 0.15 };
+  }
+};
 
 export interface SceneState {
   nodes: Record<string, LinkNode>;
@@ -139,8 +218,7 @@ const createDefaultState = (): Pick<
   };
 };
 
-const getGeometryHeight = (geometry: MeshGeometry) =>
-  geometry.kind === 'box' ? geometry.height : geometry.height;
+const getGeometryHeight = (geometry: MeshGeometry) => getGeometryBounds(geometry).height;
 
 const computeMountOffset = (parent: LinkNode, child: LinkNode): [number, number, number] => {
   const parentHeight = getGeometryHeight(parent.geometry);
@@ -169,8 +247,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const parent = nodes[parentId];
     if (!parent) return;
 
-    const geometry: MeshGeometry =
-      kind === 'box' ? defaultBox() : defaultCylinder();
+    const geometry: MeshGeometry = createDefaultGeometry(kind);
 
     const jointName = createId('joint');
     const newId = createId('link');
@@ -179,7 +256,16 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     const newNode: LinkNode = {
       id: newId,
-      name: kind === 'box' ? 'Link Box' : 'Link Cylinder',
+      name:
+        kind === 'box'
+          ? 'Link Box'
+          : kind === 'cylinder'
+          ? 'Link Cylinder'
+          : kind === 'sphere'
+          ? 'Link Sphere'
+          : kind === 'cone'
+          ? 'Link Cone'
+          : 'Link Capsule',
       geometry,
       color: randomColor(),
       parentId,
