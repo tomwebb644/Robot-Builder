@@ -1,75 +1,40 @@
-import { useEffect } from 'react';
-import { shallow } from 'zustand/shallow';
-import { JointControlPanel } from './components/JointControlPanel';
-import { InspectorPanel } from './components/InspectorPanel';
-import { SceneViewport } from './components/SceneViewport';
-import { Toolbar } from './components/Toolbar';
-import { TcpStatusIndicator } from './components/TcpStatusIndicator';
-import { useRobotStore } from './state/robotStore';
-import type { TcpStatus } from './state/robotStore';
+import React, { useEffect } from 'react';
+import Toolbar from '@components/Toolbar';
+import ControlPanel from '@components/ControlPanel';
+import Workspace from '@components/Workspace';
+import InspectorPanel from '@components/InspectorPanel';
+import StatusBar from '@components/StatusBar';
+import { useSceneStore } from '@state/store';
 
-export default function App() {
-  const { applyRemoteUpdates, setTcpStatus, loadInitialJointState } = useRobotStore(
-    (state) => ({
-      applyRemoteUpdates: state.applyRemoteUpdates,
-      setTcpStatus: state.setTcpStatus,
-      loadInitialJointState: state.loadInitialJointState
-    }),
-    shallow
-  );
+const App: React.FC = () => {
+  const applyRemoteJointValues = useSceneStore((state) => state.applyRemoteJointValues);
+  const setTcpStatus = useSceneStore((state) => state.setTcpStatus);
 
   useEffect(() => {
-    const initialLoad = async () => {
-      try {
-        await loadInitialJointState();
-      } catch (error) {
-        console.error('Failed to load initial joint state from main process', error);
+    if (!window.api?.onJointUpdate) return;
+    const unsubscribe = window.api.onJointUpdate((payload) => {
+      applyRemoteJointValues(payload);
+      const keys = Object.keys(payload);
+      if (keys.length > 0) {
+        setTcpStatus(`last update ${new Date().toLocaleTimeString()} (${keys.join(', ')})`);
       }
-    };
-
-    initialLoad();
-
-    const cleanupFns: Array<() => void> = [];
-
-    if (window.robotAPI?.onJointUpdate) {
-      cleanupFns.push(
-        window.robotAPI.onJointUpdate((updates) => {
-          applyRemoteUpdates(updates);
-        })
-      );
-    }
-
-    if (window.robotAPI?.onTcpStatus) {
-      cleanupFns.push(
-        window.robotAPI.onTcpStatus((status) => {
-          if (!status || typeof status.status !== 'string') {
-            return;
-          }
-          const allowed: TcpStatus[] = ['offline', 'listening', 'connected', 'error'];
-          const nextStatus = allowed.includes(status.status as TcpStatus)
-            ? (status.status as TcpStatus)
-            : 'error';
-          setTcpStatus(nextStatus, status.message);
-        })
-      );
-    }
-
+    });
     return () => {
-      cleanupFns.forEach((cleanup) => cleanup());
+      unsubscribe?.();
     };
-  }, [applyRemoteUpdates, loadInitialJointState, setTcpStatus]);
+  }, [applyRemoteJointValues, setTcpStatus]);
 
   return (
     <div className="app-shell">
       <Toolbar />
-      <div className="status-bar">
-        <TcpStatusIndicator />
-      </div>
-      <div className="main-layout">
-        <JointControlPanel />
-        <SceneViewport />
+      <div className="main-content">
+        <ControlPanel />
+        <Workspace />
         <InspectorPanel />
       </div>
+      <StatusBar />
     </div>
   );
-}
+};
+
+export default App;

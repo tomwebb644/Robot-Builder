@@ -1,35 +1,23 @@
-const { contextBridge, ipcRenderer } = require('electron');
+import { contextBridge, ipcRenderer } from 'electron';
 
-contextBridge.exposeInMainWorld('robotAPI', {
-  setJointValue: (payload) => {
-    if (!payload || typeof payload.name !== 'string') {
-      return;
-    }
-    ipcRenderer.send('joint:setValue', payload);
+const api = {
+  onJointUpdate(callback) {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('tcp-joint-update', listener);
+    return () => ipcRenderer.removeListener('tcp-joint-update', listener);
   },
-  onJointUpdate: (callback) => {
-    if (typeof callback !== 'function') {
-      return () => undefined;
-    }
-    const subscription = (_event, updates) => {
-      callback(updates);
-    };
-    ipcRenderer.on('joint:update', subscription);
-    return () => {
-      ipcRenderer.removeListener('joint:update', subscription);
-    };
+  sendJointValue(payload) {
+    ipcRenderer.send('set-joint-value', payload);
   },
-  onTcpStatus: (callback) => {
-    if (typeof callback !== 'function') {
-      return () => undefined;
-    }
-    const subscription = (_event, status) => {
-      callback(status);
-    };
-    ipcRenderer.on('tcp:status', subscription);
-    return () => {
-      ipcRenderer.removeListener('tcp:status', subscription);
-    };
+  saveScene(scene) {
+    return ipcRenderer.invoke('save-scene', scene);
   },
-  requestInitialJointState: () => ipcRenderer.invoke('joint:getState')
-});
+  loadScene() {
+    return ipcRenderer.invoke('load-scene');
+  },
+  log(message) {
+    ipcRenderer.send('log-info', message);
+  }
+};
+
+contextBridge.exposeInMainWorld('api', api);

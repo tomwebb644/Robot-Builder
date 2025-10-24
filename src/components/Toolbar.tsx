@@ -1,25 +1,84 @@
-import { Plus, Save, Play, Pause, Link2 } from 'lucide-react';
+import React from 'react';
+import { useSceneStore } from '@state/store';
+import type { SceneData } from '@state/store';
 
-const TOOLBAR_ACTIONS = [
-  { icon: Plus, label: 'Add Primitive', action: 'add-primitive' },
-  { icon: Link2, label: 'Connect Links', action: 'connect-links' },
-  { icon: Play, label: 'Simulate', action: 'simulate' },
-  { icon: Pause, label: 'Pause', action: 'pause' },
-  { icon: Save, label: 'Save', action: 'save' }
-];
+const Toolbar: React.FC = () => {
+  const addLink = useSceneStore((state) => state.addLink);
+  const exportScene = useSceneStore((state) => state.exportScene);
+  const importScene = useSceneStore((state) => state.importScene);
+  const resetScene = useSceneStore((state) => state.resetScene);
+  const startConnection = useSceneStore((state) => state.startConnection);
+  const cancelConnection = useSceneStore((state) => state.cancelConnection);
+  const connectMode = useSceneStore((state) => state.connectMode);
+  const selectedId = useSceneStore((state) => state.selectedId);
+  const setSimulationPlaying = useSceneStore((state) => state.setSimulationPlaying);
+  const simulationPlaying = useSceneStore((state) => state.simulationPlaying);
 
-export function Toolbar() {
+  const handleSave = async () => {
+    const scene = exportScene();
+    try {
+      const result = await window.api.saveScene(scene as SceneData);
+      if (result.success) {
+        window.api.log(`Scene saved to ${result.filePath}`);
+      }
+    } catch (error) {
+      console.error('Failed to save scene', error);
+    }
+  };
+
+  const handleLoad = async () => {
+    try {
+      const result = await window.api.loadScene();
+      if (result.success && result.scene) {
+        importScene(result.scene as SceneData);
+      }
+    } catch (error) {
+      console.error('Failed to load scene', error);
+    }
+  };
+
+  const handleConnectToggle = () => {
+    if (connectMode) {
+      cancelConnection();
+    } else if (selectedId) {
+      startConnection();
+    }
+  };
+
+  const handleSimulationToggle = () => {
+    setSimulationPlaying(!simulationPlaying);
+  };
+
   return (
-    <header className="toolbar">
-      <div className="toolbar-title">Robot Builder Studio</div>
-      <nav className="toolbar-actions" aria-label="Primary actions">
-        {TOOLBAR_ACTIONS.map(({ icon: Icon, label }) => (
-          <button key={label} className="toolbar-button" type="button" title={label} aria-label={label}>
-            <Icon size={16} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
-    </header>
+    <div className="toolbar">
+      <button type="button" onClick={() => addLink('box')}>
+        Add Cuboid
+      </button>
+      <button type="button" onClick={() => addLink('cylinder')}>
+        Add Cylinder
+      </button>
+      <button
+        type="button"
+        onClick={handleConnectToggle}
+        className={connectMode ? 'active' : ''}
+        disabled={!connectMode && !selectedId}
+      >
+        Connect
+      </button>
+      <button type="button" onClick={handleSimulationToggle} className={simulationPlaying ? 'active' : ''}>
+        {simulationPlaying ? 'Pause Simulation' : 'Simulate'}
+      </button>
+      <button type="button" onClick={handleSave}>
+        Save Scene
+      </button>
+      <button type="button" onClick={handleLoad}>
+        Load Scene
+      </button>
+      <button type="button" onClick={resetScene}>
+        Reset
+      </button>
+    </div>
   );
-}
+};
+
+export default Toolbar;

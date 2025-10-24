@@ -1,148 +1,114 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
-const path = require('path');
-const net = require('net');
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { createServer } from 'net';
+import fs from 'fs/promises';
 
-const TCP_PORT = Number.parseInt(process.env.ROBOT_TCP_PORT || '5555', 10);
-const jointState = {};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let mainWindow = null;
 const tcpClients = new Set();
-let mainWindow;
-let tcpServer;
 
-function createWindow() {
+const isDev = !app.isPackaged;
+
+const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1200,
-    minHeight: 720,
-    backgroundColor: '#10121a',
+    minHeight: 800,
+    backgroundColor: '#111111',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      nodeIntegration: false
     }
   });
 
-  const devServer = process.env.VITE_DEV_SERVER_URL;
-  if (devServer) {
-    mainWindow.loadURL(devServer);
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173');
   } else {
-    const indexHtml = path.join(__dirname, '..', 'dist', 'index.html');
+    const indexHtml = path.join(__dirname, '../dist/index.html');
     mainWindow.loadFile(indexHtml);
   }
-}
+};
 
-function parseMessage(rawMessage) {
-  if (!rawMessage) {
-    return null;
-  }
-
-  const trimmed = rawMessage.trim();
-  if (!trimmed) {
-    return null;
-  }
-
+const parseMessage = (message) => {
+  const trimmed = message.trim();
+  if (!trimmed) return null;
   try {
     const parsed = JSON.parse(trimmed);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed;
-    }
+    return typeof parsed === 'object' && parsed !== null ? parsed : null;
   } catch (error) {
-    // fall through to delimited parsing
-  }
-
-  const updates = {};
-  let hasUpdates = false;
-  const segments = trimmed.split(/[,;\n]+/);
-  for (const segment of segments) {
-    const [key, value] = segment.split(/[:=]/).map((entry) => entry?.trim()).filter(Boolean);
-    if (!key || value === undefined) {
-      continue;
+    const pairs = trimmed.split(/[,;\n]+/);
+    const result = {};
+    let matched = false;
+    for (const pair of pairs) {
+      const [rawKey, rawValue] = pair.split(/[:=]/);
+      if (!rawKey || rawValue === undefined) continue;
+      const key = rawKey.trim();
+      const value = Number(rawValue.trim());
+      if (!Number.isNaN(value)) {
+        result[key] = value;
+        matched = true;
+      }
     }
-    const numericValue = Number.parseFloat(value);
-    if (Number.isFinite(numericValue)) {
-      updates[key] = numericValue;
-      hasUpdates = true;
-    }
+    return matched ? result : null;
   }
+};
 
-  return hasUpdates ? updates : null;
-}
-
-function forwardJointUpdateToRenderer(updates) {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
-  mainWindow.webContents.send('joint:update', updates);
-}
-
-function forwardJointUpdateToClients(updates, ignoreSocket) {
-  const payload = `${JSON.stringify(updates)}\n`;
-  for (const socket of tcpClients) {
-    if (socket.destroyed || socket === ignoreSocket) {
-      continue;
-    }
-    socket.write(payload);
-  }
-}
-
-function notifyTcpStatus(status, message) {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
-  mainWindow.webContents.send('tcp:status', { status, message });
-}
-
-function setupTcpServer() {
-  if (tcpServer) {
-    return;
-  }
-
-  tcpServer = net.createServer((socket) => {
+const startTCPServer = () => {
+  const server = createServer((socket) => {
     tcpClients.add(socket);
-    notifyTcpStatus('connected');
-
     let buffer = '';
 
     socket.on('data', (data) => {
-      buffer += data.toString('utf8');
-
+      buffer += data.toString();
       let newlineIndex = buffer.indexOf('\n');
-      while (newlineIndex >= 0) {
-        const message = buffer.slice(0, newlineIndex);
+      while (newlineIndex !== -1) {
+        const chunk = buffer.slice(0, newlineIndex);
         buffer = buffer.slice(newlineIndex + 1);
-        const updates = parseMessage(message);
-        if (updates) {
-          Object.assign(jointState, updates);
-          forwardJointUpdateToRenderer(updates);
-          forwardJointUpdateToClients(updates, socket);
+        const payload = parseMessage(chunk);
+        if (payload && mainWindow) {
+          mainWindow.webContents.send('tcp-joint-update', payload);
         }
         newlineIndex = buffer.indexOf('\n');
       }
     });
 
-    socket.on('error', (error) => {
-      notifyTcpStatus('error', error.message);
+    socket.on('end', () => {
+      if (buffer.length > 0) {
+        const payload = parseMessage(buffer);
+        if (payload && mainWindow) {
+          mainWindow.webContents.send('tcp-joint-update', payload);
+        }
+        buffer = '';
+      }
+      tcpClients.delete(socket);
     });
 
     socket.on('close', () => {
       tcpClients.delete(socket);
-      notifyTcpStatus(tcpClients.size > 0 ? 'connected' : 'listening');
+    });
+
+    socket.on('error', () => {
+      tcpClients.delete(socket);
     });
   });
 
-  tcpServer.on('error', (error) => {
-    notifyTcpStatus('error', error.message);
+  const port = 5555;
+  server.listen(port, () => {
+    console.log(`TCP server listening on port ${port}`);
   });
-
-  tcpServer.listen(TCP_PORT, () => {
-    notifyTcpStatus('listening');
+  server.on('error', (error) => {
+    console.error('TCP server error', error);
   });
-}
+};
 
 app.whenReady().then(() => {
   createWindow();
-  setupTcpServer();
+  startTCPServer();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -157,13 +123,41 @@ app.on('window-all-closed', () => {
   }
 });
 
-ipcMain.on('joint:setValue', (_event, payload) => {
-  const { name, value } = payload || {};
-  if (typeof name !== 'string' || typeof value !== 'number' || Number.isNaN(value)) {
-    return;
+ipcMain.on('set-joint-value', (_event, payload) => {
+  const message = JSON.stringify(payload);
+  for (const client of tcpClients) {
+    if (!client.destroyed) {
+      client.write(message + '\n');
+    }
   }
-  jointState[name] = value;
-  forwardJointUpdateToClients({ [name]: value });
 });
 
-ipcMain.handle('joint:getState', () => ({ ...jointState }));
+ipcMain.handle('save-scene', async (_event, scene) => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Save Robot Scene',
+    defaultPath: path.join(app.getPath('documents'), 'robot-scene.json'),
+    filters: [{ name: 'Robot Scene', extensions: ['json'] }]
+  });
+  if (canceled || !filePath) {
+    return { success: false };
+  }
+  await fs.writeFile(filePath, JSON.stringify(scene, null, 2), 'utf-8');
+  return { success: true, filePath };
+});
+
+ipcMain.handle('load-scene', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Load Robot Scene',
+    filters: [{ name: 'Robot Scene', extensions: ['json'] }],
+    properties: ['openFile']
+  });
+  if (canceled || !filePaths || filePaths.length === 0) {
+    return { success: false };
+  }
+  const content = await fs.readFile(filePaths[0], 'utf-8');
+  return { success: true, scene: JSON.parse(content) };
+});
+
+ipcMain.on('log-info', (_event, message) => {
+  console.log('[Renderer]', message);
+});
