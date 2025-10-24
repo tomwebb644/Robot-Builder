@@ -1,0 +1,412 @@
+import React from 'react';
+import { useSceneStore } from '@state/store';
+import type {
+  JointDefinition,
+  MeshGeometry,
+  BoxGeometry,
+  CylinderGeometry,
+  MotionAxis,
+  MotionType,
+  MeshKind,
+  SphereGeometry,
+  ConeGeometry,
+  CapsuleGeometry
+} from '@state/store';
+import { createDefaultGeometry } from '@state/store';
+import NumericInput from './NumericInput';
+
+const InspectorPanel: React.FC = () => {
+  const selectedId = useSceneStore((state) => state.selectedId);
+  const nodes = useSceneStore((state) => state.nodes);
+  const updateNode = useSceneStore((state) => state.updateNode);
+  const updateJoint = useSceneStore((state) => state.updateJoint);
+  const addJoint = useSceneStore((state) => state.addJoint);
+  const removeJoint = useSceneStore((state) => state.removeJoint);
+  const removeLink = useSceneStore((state) => state.removeLink);
+  const rootId = useSceneStore((state) => state.rootId);
+
+  const node = selectedId ? nodes[selectedId] : undefined;
+
+  const onGeometryChange = (geometry: MeshGeometry) => {
+    if (!node) return;
+    updateNode(node.id, { geometry });
+  };
+
+  const onGeometryKindChange = (kind: MeshKind) => {
+    if (!node) return;
+    const defaults = createDefaultGeometry(kind);
+    const preserved = node.geometry;
+    let nextGeometry: MeshGeometry = defaults;
+    if (preserved.kind === kind) {
+      nextGeometry = preserved;
+    }
+    updateNode(node.id, { geometry: nextGeometry });
+  };
+
+  const onJointTypeChange = (joint: JointDefinition, type: MotionType) => {
+    if (!node) return;
+    const nextLimits: [number, number] = type === 'linear' ? [0, 150] : [-180, 180];
+    const nextValue = Math.max(Math.min(joint.currentValue, nextLimits[1]), nextLimits[0]);
+    updateJoint(node.id, joint.id, {
+      type,
+      limits: nextLimits,
+      currentValue: nextValue
+    });
+  };
+
+  const onJointAxisChange = (joint: JointDefinition, axis: MotionAxis) => {
+    if (!node) return;
+    updateJoint(node.id, joint.id, { axis });
+  };
+
+  const onJointPivotChange = (joint: JointDefinition, index: number, value: number) => {
+    if (!node) return;
+    const nextPivot = joint.pivot.map((entry, idx) => (idx === index ? value : entry)) as [
+      number,
+      number,
+      number
+    ];
+    updateJoint(node.id, joint.id, { pivot: nextPivot });
+  };
+
+  if (!node) {
+    return (
+      <div className="panel right">
+        <h2>Inspector</h2>
+        <div className="panel-section">
+          <p style={{ color: 'rgba(148, 163, 184, 0.8)' }}>Select a link to edit its properties.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const renderGeometryFields = (geometry: MeshGeometry) => {
+    if (geometry.kind === 'box') {
+      const box = geometry as BoxGeometry;
+      return (
+        <>
+          <label>
+            Width (m)
+            <NumericInput
+              step={0.01}
+              value={box.width}
+              precision={2}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'box', width: value, height: box.height, depth: box.depth })
+              }
+            />
+          </label>
+          <label>
+            Height (m)
+            <NumericInput
+              step={0.01}
+              value={box.height}
+              precision={2}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'box', width: box.width, height: value, depth: box.depth })
+              }
+            />
+          </label>
+          <label>
+            Depth (m)
+            <NumericInput
+              step={0.01}
+              value={box.depth}
+              precision={2}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'box', width: box.width, height: box.height, depth: value })
+              }
+            />
+          </label>
+        </>
+      );
+    }
+
+    if (geometry.kind === 'cylinder') {
+      const cylinder = geometry as CylinderGeometry;
+      return (
+        <>
+          <label>
+            Radius (m)
+            <NumericInput
+              step={0.005}
+              value={cylinder.radius}
+              precision={3}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'cylinder', radius: value, height: cylinder.height })
+              }
+            />
+          </label>
+          <label>
+            Height (m)
+            <NumericInput
+              step={0.01}
+              value={cylinder.height}
+              precision={2}
+              onValueCommit={(value) =>
+                onGeometryChange({ kind: 'cylinder', radius: cylinder.radius, height: value })
+              }
+            />
+          </label>
+        </>
+      );
+    }
+
+    if (geometry.kind === 'sphere') {
+      const sphere = geometry as SphereGeometry;
+      return (
+        <label className="full-width">
+          Radius (m)
+          <NumericInput
+            step={0.005}
+            value={sphere.radius}
+            precision={3}
+            onValueCommit={(value) => onGeometryChange({ kind: 'sphere', radius: value })}
+          />
+        </label>
+      );
+    }
+
+    if (geometry.kind === 'cone') {
+      const cone = geometry as ConeGeometry;
+      return (
+        <>
+          <label>
+            Base Radius (m)
+            <NumericInput
+              step={0.005}
+              value={cone.radius}
+              precision={3}
+              onValueCommit={(value) => onGeometryChange({ kind: 'cone', radius: value, height: cone.height })}
+            />
+          </label>
+          <label>
+            Height (m)
+            <NumericInput
+              step={0.01}
+              value={cone.height}
+              precision={2}
+              onValueCommit={(value) => onGeometryChange({ kind: 'cone', radius: cone.radius, height: value })}
+            />
+          </label>
+        </>
+      );
+    }
+
+    const capsule = geometry as CapsuleGeometry;
+    return (
+      <>
+        <label>
+          Radius (m)
+          <NumericInput
+            step={0.005}
+            value={capsule.radius}
+            precision={3}
+            onValueCommit={(value) => onGeometryChange({ kind: 'capsule', radius: value, length: capsule.length })}
+          />
+        </label>
+        <label>
+          Body Length (m)
+          <NumericInput
+            step={0.01}
+            value={capsule.length}
+            precision={2}
+            onValueCommit={(value) => onGeometryChange({ kind: 'capsule', radius: capsule.radius, length: value })}
+          />
+        </label>
+      </>
+    );
+  };
+
+  return (
+    <div className="panel right">
+      <h2>Inspector</h2>
+      <div className="panel-section inspector-panel">
+        <section>
+          <div className="section-title">Link</div>
+          <div className="inspector-grid">
+            <label className="full-width">
+              Name
+              <input
+                type="text"
+                value={node.name}
+                onChange={(event) => updateNode(node.id, { name: event.target.value })}
+              />
+            </label>
+            <label>
+              Shape
+              <select value={node.geometry.kind} onChange={(event) => onGeometryKindChange(event.target.value as MeshKind)}>
+                <option value="box">Cuboid</option>
+                <option value="cylinder">Cylinder</option>
+                <option value="sphere">Sphere</option>
+                <option value="cone">Cone</option>
+                <option value="capsule">Capsule</option>
+              </select>
+            </label>
+            <label>
+              Color
+              <input
+                type="color"
+                value={node.color}
+                onChange={(event) => updateNode(node.id, { color: event.target.value })}
+              />
+            </label>
+            {renderGeometryFields(node.geometry)}
+          </div>
+        </section>
+
+        <section>
+          <div className="section-title">Mount Offset</div>
+          <div className="inspector-grid">
+            {['X', 'Y', 'Z'].map((axis, index) => (
+              <label key={axis}>
+                {axis} (m)
+                <NumericInput
+                  step={0.01}
+                  value={node.baseOffset[index]}
+                  precision={2}
+                  onValueCommit={(value) =>
+                    updateNode(node.id, {
+                      baseOffset: node.baseOffset.map((offset, idx) => (idx === index ? value : offset)) as [
+                        number,
+                        number,
+                        number
+                      ]
+                    })
+                  }
+                />
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <div className="section-title joint-toolbar">
+            <span>Joints</span>
+            <button type="button" className="ghost" onClick={() => addJoint(node.id)}>
+              Add Joint
+            </button>
+          </div>
+          {node.joints.length === 0 ? (
+            <p className="empty-state">This link has no joints yet.</p>
+          ) : (
+            node.joints.map((joint, index) => (
+              <div key={joint.id} className="joint-block">
+                <div className="joint-header">
+                  <span>
+                    Joint {index + 1}
+                    <span className="joint-name">{joint.name}</span>
+                  </span>
+                  <div className="joint-actions">
+                    <span className="tag subtle">{joint.type}</span>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => removeJoint(node.id, joint.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+                <div className="inspector-grid">
+                  <label className="full-width">
+                    Joint Name
+                    <input
+                      type="text"
+                      value={joint.name}
+                      onChange={(event) => updateJoint(node.id, joint.id, { name: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Type
+                    <select
+                      value={joint.type}
+                      onChange={(event) => onJointTypeChange(joint, event.target.value as MotionType)}
+                    >
+                      <option value="rotational">Rotational</option>
+                      <option value="linear">Linear</option>
+                    </select>
+                  </label>
+                  <label>
+                    Axis
+                    <select
+                      value={joint.axis}
+                      onChange={(event) => onJointAxisChange(joint, event.target.value as MotionAxis)}
+                    >
+                      <option value="x">X</option>
+                      <option value="y">Y</option>
+                      <option value="z">Z</option>
+                    </select>
+                  </label>
+                  <label>
+                    Min
+                    <NumericInput
+                      step={joint.type === 'rotational' ? 1 : 0.5}
+                      value={joint.limits[0]}
+                      onValueCommit={(value) =>
+                        updateJoint(node.id, joint.id, {
+                          limits: [value, joint.limits[1]]
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Max
+                    <NumericInput
+                      step={joint.type === 'rotational' ? 1 : 0.5}
+                      value={joint.limits[1]}
+                      onValueCommit={(value) =>
+                        updateJoint(node.id, joint.id, {
+                          limits: [joint.limits[0], value]
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Current
+                    <NumericInput
+                      step={joint.type === 'rotational' ? 1 : 0.5}
+                      value={joint.currentValue}
+                      onValueCommit={(value) => updateJoint(node.id, joint.id, { currentValue: value })}
+                    />
+                  </label>
+                </div>
+                <div className="inspector-grid pivot-grid">
+                  {['X', 'Y', 'Z'].map((axis, pivotIndex) => (
+                    <label key={`${joint.id}-pivot-${axis}`}>
+                      Pivot {axis} (m)
+                      <NumericInput
+                        step={0.01}
+                        value={joint.pivot[pivotIndex]}
+                        precision={2}
+                        onValueCommit={(value) => onJointPivotChange(joint, pivotIndex, value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </section>
+
+        <section>
+          <div className="section-title">Notes</div>
+          <textarea
+            value={node.notes ?? ''}
+            placeholder="Document connection details, payload, tooling, etc."
+            onChange={(event) => updateNode(node.id, { notes: event.target.value })}
+          />
+        </section>
+        {node.id !== rootId ? (
+          <section className="danger-zone">
+            <button type="button" className="danger" onClick={() => removeLink(node.id)}>
+              Remove Link and Children
+            </button>
+          </section>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
+export default InspectorPanel;
