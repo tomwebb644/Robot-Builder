@@ -7,6 +7,9 @@ const api = {
   disconnectTcp() {
     return ipcRenderer.invoke('tcp-disconnect');
   },
+  getTcpStatus() {
+    return ipcRenderer.invoke('tcp-status-current');
+  },
   sendJointState(payload) {
     ipcRenderer.send('send-joint-state', payload);
   },
@@ -20,3 +23,5 @@ const api = {
 };
 
 contextBridge.exposeInMainWorld('simulatorAPI', api);
+
+window.dispatchEvent(new Event('simulator-api-ready'));

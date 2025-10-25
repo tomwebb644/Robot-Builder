@@ -37,15 +37,40 @@ const App: React.FC = () => {
     if (typeof window === 'undefined') {
       return;
     }
-    if (!window.simulatorAPI) {
-      setBridgeAvailable(false);
-      return;
-    }
-    setBridgeAvailable(true);
-    const dispose = window.simulatorAPI.onTcpStatus((payload) => {
-      setStatus(payload);
-    });
+    let dispose: (() => void) | undefined;
+
+    const attachBridge = async () => {
+      if (!window.simulatorAPI) {
+        setBridgeAvailable(false);
+        return;
+      }
+
+      setBridgeAvailable(true);
+      dispose?.();
+      dispose = window.simulatorAPI.onTcpStatus((payload) => {
+        setStatus(payload);
+      });
+
+      try {
+        const initial = await window.simulatorAPI.getTcpStatus();
+        if (initial?.status) {
+          setStatus(initial);
+        }
+      } catch (err) {
+        console.error('Failed to read TCP status from Electron bridge', err);
+      }
+    };
+
+    attachBridge();
+
+    const readyListener = () => {
+      attachBridge();
+    };
+
+    window.addEventListener('simulator-api-ready', readyListener);
+
     return () => {
+      window.removeEventListener('simulator-api-ready', readyListener);
       dispose?.();
     };
   }, []);

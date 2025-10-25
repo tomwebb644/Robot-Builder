@@ -126,6 +126,8 @@ ipcMain.handle('tcp-disconnect', async () => {
   disposeTcpClient();
 });
 
+ipcMain.handle('tcp-status-current', async () => ({ status: currentStatus, message: currentMessage }));
+
 ipcMain.on('send-joint-state', (_event, payload) => {
   if (!payload || typeof payload !== 'object' || !tcpClient || tcpClient.destroyed) {
     return;
