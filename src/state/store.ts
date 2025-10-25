@@ -2,7 +2,8 @@ import { create } from 'zustand';
 
 export type MotionType = 'rotational' | 'linear';
 export type MotionAxis = 'x' | 'y' | 'z';
-export type MeshKind = 'box' | 'cylinder' | 'sphere' | 'cone' | 'capsule';
+export type MeshKind = 'box' | 'cylinder' | 'sphere' | 'cone' | 'capsule' | 'custom';
+export type PrimitiveMeshKind = Exclude<MeshKind, 'custom'>;
 export type NetworkSource = 'tcp' | 'ui' | 'manual' | 'simulation' | 'playback';
 
 export interface NetworkEvent {
@@ -54,7 +55,22 @@ export interface CapsuleGeometry {
   length: number;
 }
 
-export type MeshGeometry = BoxGeometry | CylinderGeometry | SphereGeometry | ConeGeometry | CapsuleGeometry;
+export interface CustomGeometry {
+  kind: 'custom';
+  sourceName: string;
+  data: string;
+  scale: number;
+  bounds: GeometryBounds;
+  originOffset: [number, number, number];
+}
+
+export type MeshGeometry =
+  | BoxGeometry
+  | CylinderGeometry
+  | SphereGeometry
+  | ConeGeometry
+  | CapsuleGeometry
+  | CustomGeometry;
 
 export interface GeometryBounds {
   width: number;
@@ -78,6 +94,7 @@ export interface LinkNode {
   parentId?: string;
   children: string[];
   baseOffset: [number, number, number];
+  staticRotation: [number, number, number];
   joints: JointDefinition[];
   notes?: string;
 }
@@ -213,7 +230,7 @@ const defaultSphere = (): SphereGeometry => ({ kind: 'sphere', radius: 0.18 });
 const defaultCone = (): ConeGeometry => ({ kind: 'cone', radius: 0.16, height: 0.38 });
 const defaultCapsule = (): CapsuleGeometry => ({ kind: 'capsule', radius: 0.12, length: 0.28 });
 
-const geometryFactory: Record<MeshKind, () => MeshGeometry> = {
+const geometryFactory: Record<PrimitiveMeshKind, () => MeshGeometry> = {
   box: defaultBox,
   cylinder: defaultCylinder,
   sphere: defaultSphere,
@@ -221,7 +238,96 @@ const geometryFactory: Record<MeshKind, () => MeshGeometry> = {
   capsule: defaultCapsule
 };
 
-export const createDefaultGeometry = (kind: MeshKind): MeshGeometry => geometryFactory[kind]();
+export const createDefaultGeometry = (kind: PrimitiveMeshKind): MeshGeometry => geometryFactory[kind]();
+
+const coerceNumber = (value: unknown, fallback: number) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const normalizeBounds = (source: Partial<GeometryBounds> | undefined, fallback: GeometryBounds): GeometryBounds => {
+  const width = Math.max(coerceNumber(source?.width, fallback.width), 1e-6);
+  const depth = Math.max(coerceNumber(source?.depth, fallback.depth), 1e-6);
+  const height = Math.max(coerceNumber(source?.height, fallback.height), 1e-6);
+  const radial = Math.max(
+    coerceNumber(source?.radial, Math.max(width, depth) / 2),
+    Math.max(width, depth) / 2,
+    1e-6
+  );
+  return { width, depth, height, radial };
+};
+
+const normalizeGeometry = (geometry: any): MeshGeometry => {
+  if (!geometry || typeof geometry !== 'object') {
+    return defaultBox();
+  }
+  switch ((geometry as any).kind) {
+    case 'box':
+      return {
+        kind: 'box',
+        width: Math.max(coerceNumber((geometry as any).width, 0.3), 1e-3),
+        height: Math.max(coerceNumber((geometry as any).height, 0.3), 1e-3),
+        depth: Math.max(coerceNumber((geometry as any).depth, 0.3), 1e-3)
+      };
+    case 'cylinder':
+      return {
+        kind: 'cylinder',
+        radius: Math.max(coerceNumber((geometry as any).radius, 0.15), 1e-3),
+        height: Math.max(coerceNumber((geometry as any).height, 0.4), 1e-3)
+      };
+    case 'sphere':
+      return {
+        kind: 'sphere',
+        radius: Math.max(coerceNumber((geometry as any).radius, 0.18), 1e-3)
+      };
+    case 'cone':
+      return {
+        kind: 'cone',
+        radius: Math.max(coerceNumber((geometry as any).radius, 0.16), 1e-3),
+        height: Math.max(coerceNumber((geometry as any).height, 0.38), 1e-3)
+      };
+    case 'capsule':
+      return {
+        kind: 'capsule',
+        radius: Math.max(coerceNumber((geometry as any).radius, 0.12), 1e-3),
+        length: Math.max(coerceNumber((geometry as any).length, 0.28), 1e-3)
+      };
+    case 'custom': {
+      const data = typeof (geometry as any).data === 'string' ? (geometry as any).data : '';
+      if (!data) {
+        return defaultBox();
+      }
+      const baseBounds = normalizeBounds((geometry as any).bounds, {
+        width: 0.3,
+        depth: 0.3,
+        height: 0.3,
+        radial: 0.15
+      });
+      const scaleValue = coerceNumber((geometry as any).scale, 1);
+      const scale = Number.isFinite(scaleValue) && scaleValue > 0 ? scaleValue : 1;
+      const sourceName =
+        typeof (geometry as any).sourceName === 'string' && (geometry as any).sourceName.trim()
+          ? (geometry as any).sourceName
+          : 'Custom Mesh';
+      const offsetSource = Array.isArray((geometry as any).originOffset) ? (geometry as any).originOffset : [0, 0, 0];
+      const originOffset: [number, number, number] = [
+        coerceNumber(offsetSource[0], 0),
+        coerceNumber(offsetSource[1], 0),
+        coerceNumber(offsetSource[2], 0)
+      ];
+      return {
+        kind: 'custom',
+        sourceName,
+        data,
+        scale,
+        bounds: baseBounds,
+        originOffset
+      };
+    }
+    default:
+      return defaultBox();
+  }
+};
 
 export const getGeometryBounds = (geometry: MeshGeometry): GeometryBounds => {
   switch (geometry.kind) {
@@ -260,6 +366,15 @@ export const getGeometryBounds = (geometry: MeshGeometry): GeometryBounds => {
         height: geometry.length + geometry.radius * 2,
         radial: geometry.radius
       };
+    case 'custom': {
+      const scale = Number.isFinite(geometry.scale) ? geometry.scale : 1;
+      return {
+        width: geometry.bounds.width * scale,
+        depth: geometry.bounds.depth * scale,
+        height: geometry.bounds.height * scale,
+        radial: geometry.bounds.radial * scale
+      };
+    }
     default:
       return { width: 0.3, depth: 0.3, height: 0.3, radial: 0.15 };
   }
@@ -282,7 +397,8 @@ export interface SceneState {
   poses: PoseDefinition[];
   simulationPlaying: boolean;
   simulationTime: number;
-  addLink: (kind: MeshKind) => void;
+  addLink: (kind: PrimitiveMeshKind) => void;
+  addCustomLink: (geometry: CustomGeometry) => void;
   selectNode: (id?: string) => void;
   updateJoint: (nodeId: string, jointId: string, patch: Partial<JointDefinition>) => void;
   addJoint: (nodeId: string, type?: MotionType) => void;
@@ -323,6 +439,7 @@ const createDefaultState = (): Pick<
     color: '#64748b',
     children: [],
     baseOffset: [0, 0, 0],
+    staticRotation: [0, 0, 0],
     joints: []
   };
 
@@ -404,6 +521,72 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       parentId,
       children: [],
       baseOffset: [0, 0, offsetZ],
+      staticRotation: [0, 0, 0],
+      joints: [initialJoint]
+    };
+
+    set((state) => {
+      const parentNode = state.nodes[parentId];
+      if (!parentNode) {
+        return state;
+      }
+      const nextNodes: Record<string, LinkNode> = {
+        ...state.nodes,
+        [newId]: newNode,
+        [parentId]: {
+          ...parentNode,
+          children: [...parentNode.children, newId]
+        }
+      };
+      const poses = state.poses.map((pose) => ({
+        ...pose,
+        values: {
+          ...pose.values,
+          [initialJoint.name]: initialJoint.currentValue
+        }
+      }));
+      return {
+        nodes: nextNodes,
+        selectedId: newId,
+        connectMode: false,
+        connectSourceId: undefined,
+        poses
+      };
+    });
+  },
+  addCustomLink: (geometry) => {
+    const { selectedId, rootId, nodes } = get();
+    const parentId = selectedId ?? rootId;
+    const parent = nodes[parentId];
+    if (!parent) return;
+
+    const jointId = createId('joint');
+    const newId = createId('link');
+    const parentHeight = parent.geometry ? getGeometryHeight(parent.geometry) : 0.2;
+    const offsetZ = parentHeight / 2 + getGeometryHeight(geometry) / 2 + 0.05;
+    const pivot = getDefaultJointPivot(geometry);
+    const jointName = getNextJointName(nodes);
+    const initialJoint: JointDefinition = {
+      id: jointId,
+      type: 'rotational',
+      axis: 'z',
+      limits: [-90, 90],
+      currentValue: 0,
+      name: jointName,
+      externalControl: false,
+      pivot
+    };
+
+    const baseName = geometry.sourceName?.replace(/\.[^.]+$/, '') ?? 'Custom Link';
+    const newNode: LinkNode = {
+      id: newId,
+      name: baseName || 'Custom Link',
+      geometry,
+      color: randomColor(),
+      parentId,
+      children: [],
+      baseOffset: [0, 0, offsetZ],
+      staticRotation: [0, 0, 0],
       joints: [initialJoint]
     };
 
@@ -585,10 +768,23 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set((state) => {
       const node = state.nodes[id];
       if (!node) return state;
+      const baseOffset =
+        patch.baseOffset !== undefined
+          ? (patch.baseOffset.map((value, index) =>
+              Number.isFinite(value) ? Number(value) : node.baseOffset[index]
+            ) as [number, number, number])
+          : node.baseOffset;
+      const staticRotation =
+        patch.staticRotation !== undefined
+          ? (patch.staticRotation.map((value, index) =>
+              Number.isFinite(value) ? Number(value) : node.staticRotation[index]
+            ) as [number, number, number])
+          : node.staticRotation;
       const nextNode: LinkNode = {
         ...node,
         ...patch,
-        baseOffset: patch.baseOffset ?? node.baseOffset
+        baseOffset,
+        staticRotation
       };
       if (patch.geometry) {
         nextNode.geometry = {
@@ -740,7 +936,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const nodeEntries = Object.entries(scene?.nodes ?? {});
     for (const [id, rawNode] of nodeEntries) {
       if (!rawNode || typeof rawNode !== 'object') continue;
-      const geometry = (rawNode as any).geometry ?? defaultBox();
+      const geometry = normalizeGeometry((rawNode as any).geometry);
       const defaultPivot = getDefaultJointPivot(geometry);
       const rawJoints: any[] = Array.isArray((rawNode as any).joints)
         ? ((rawNode as any).joints as any[])
@@ -792,6 +988,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
                 Number((rawNode as any).baseOffset[0]),
                 Number((rawNode as any).baseOffset[1]),
                 Number((rawNode as any).baseOffset[2])
+              ]
+            : [0, 0, 0],
+        staticRotation:
+          Array.isArray((rawNode as any).staticRotation) && (rawNode as any).staticRotation.length === 3
+            ? [
+                Number((rawNode as any).staticRotation[0]) || 0,
+                Number((rawNode as any).staticRotation[1]) || 0,
+                Number((rawNode as any).staticRotation[2]) || 0
               ]
             : [0, 0, 0],
         joints,

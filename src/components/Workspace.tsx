@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import { useSceneStore } from '@state/store';
 import type { MotionAxis, MeshGeometry } from '@state/store';
 import { getGeometryBounds } from '@state/store';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
+import { base64ToArrayBuffer } from '@utils/binary';
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
@@ -98,6 +100,44 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
     : node.color;
   const emissive = isSelected ? node.color : isConnectTarget ? '#6366f1' : '#000000';
 
+  const loader = useMemo(() => new STLLoader(), []);
+  const customGeometry = useMemo(() => {
+    if (node.geometry.kind !== 'custom') {
+      return null;
+    }
+    try {
+      const buffer = base64ToArrayBuffer(node.geometry.data);
+      const parsed = loader.parse(buffer);
+      parsed.computeVertexNormals();
+      parsed.translate(
+        node.geometry.originOffset[0],
+        node.geometry.originOffset[1],
+        node.geometry.originOffset[2]
+      );
+      const scale = Number.isFinite(node.geometry.scale) ? node.geometry.scale : 1;
+      parsed.scale(scale, scale, scale);
+      return parsed;
+    } catch (error) {
+      console.error('Failed to parse custom geometry', error);
+      return null;
+    }
+  }, [loader, node.geometry]);
+
+  useEffect(() => {
+    return () => {
+      customGeometry?.dispose();
+    };
+  }, [customGeometry]);
+
+  const staticRotationRadians = useMemo(() => {
+    const rotation = node.staticRotation ?? [0, 0, 0];
+    return [
+      THREE.MathUtils.degToRad(rotation[0]),
+      THREE.MathUtils.degToRad(rotation[1]),
+      THREE.MathUtils.degToRad(rotation[2])
+    ] as [number, number, number];
+  }, [node.staticRotation]);
+
   const geometryElement = useMemo(() => {
     const geometry: MeshGeometry = node.geometry;
     switch (geometry.kind) {
@@ -111,13 +151,15 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
         return <coneGeometry args={[geometry.radius, geometry.height, 32]} />;
       case 'capsule':
         return <capsuleGeometry args={[geometry.radius, geometry.length, 8, 16]} />;
+      case 'custom':
+        return customGeometry ? <primitive object={customGeometry} attach="geometry" /> : null;
       default:
         return null;
     }
-  }, [node.geometry]);
+  }, [node.geometry, customGeometry]);
 
   const baseChildren = (
-    <>
+    <group rotation={staticRotationRadians}>
       <mesh
         castShadow
         receiveShadow
@@ -131,7 +173,7 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
       {node.children.map((child) => (
         <LinkGroup nodeId={child} key={child} />
       ))}
-    </>
+    </group>
   );
 
   const jointWrapped = node.joints.reduceRight<React.ReactNode>((childContent, joint) => {

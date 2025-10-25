@@ -1,9 +1,13 @@
 import React, { useRef, useState } from 'react';
+import * as THREE from 'three';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
 import { useSceneStore } from '@state/store';
-import type { SceneData, MeshKind } from '@state/store';
+import type { SceneData, PrimitiveMeshKind, CustomGeometry } from '@state/store';
+import { arrayBufferToBase64 } from '@utils/binary';
 
 const Toolbar: React.FC = () => {
   const addLink = useSceneStore((state) => state.addLink);
+  const addCustomLink = useSceneStore((state) => state.addCustomLink);
   const exportScene = useSceneStore((state) => state.exportScene);
   const importScene = useSceneStore((state) => state.importScene);
   const resetScene = useSceneStore((state) => state.resetScene);
@@ -13,8 +17,9 @@ const Toolbar: React.FC = () => {
   const selectedId = useSceneStore((state) => state.selectedId);
   const setSimulationPlaying = useSceneStore((state) => state.setSimulationPlaying);
   const simulationPlaying = useSceneStore((state) => state.simulationPlaying);
-  const [pendingKind, setPendingKind] = useState<MeshKind>('box');
+  const [pendingKind, setPendingKind] = useState<PrimitiveMeshKind>('box');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const stlInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleSave = async () => {
     const scene = exportScene();
@@ -62,6 +67,55 @@ const Toolbar: React.FC = () => {
     fileInputRef.current?.click();
   };
 
+  const handleCustomShapeImport = () => {
+    stlInputRef.current?.click();
+  };
+
+  const handleStlChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const buffer = await file.arrayBuffer();
+      const loader = new STLLoader();
+      const geometry = loader.parse(buffer);
+      geometry.computeBoundingBox();
+      geometry.computeVertexNormals();
+      const positionAttribute = geometry.getAttribute('position');
+      const fallbackBounds = new THREE.Box3();
+      if (positionAttribute && 'itemSize' in positionAttribute) {
+        fallbackBounds.setFromBufferAttribute(positionAttribute as THREE.BufferAttribute);
+      }
+      const bounds = geometry.boundingBox ?? fallbackBounds;
+      const size = new THREE.Vector3();
+      bounds.getSize(size);
+      const center = new THREE.Vector3();
+      bounds.getCenter(center);
+      geometry.dispose();
+      const baseBounds = {
+        width: size.x || 0.3,
+        depth: size.y || 0.3,
+        height: size.z || 0.3,
+        radial: Math.max(size.x, size.y, 0.3) / 2
+      };
+      const originOffset: [number, number, number] = [-center.x, -center.y, -center.z];
+      const customGeometry: CustomGeometry = {
+        kind: 'custom',
+        sourceName: file.name,
+        data: arrayBufferToBase64(buffer),
+        scale: 1,
+        bounds: baseBounds,
+        originOffset
+      };
+      addCustomLink(customGeometry);
+    } catch (error) {
+      console.error('Failed to import STL mesh', error);
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
@@ -99,9 +153,16 @@ const Toolbar: React.FC = () => {
         style={{ display: 'none' }}
         onChange={handleFileChange}
       />
+      <input
+        ref={stlInputRef}
+        type="file"
+        accept=".stl"
+        style={{ display: 'none' }}
+        onChange={handleStlChange}
+      />
       <label className="shape-selector">
         <span>Shape</span>
-        <select value={pendingKind} onChange={(event) => setPendingKind(event.target.value as MeshKind)}>
+        <select value={pendingKind} onChange={(event) => setPendingKind(event.target.value as PrimitiveMeshKind)}>
           <option value="box">Cuboid</option>
           <option value="cylinder">Cylinder</option>
           <option value="sphere">Sphere</option>
@@ -111,6 +172,9 @@ const Toolbar: React.FC = () => {
       </label>
       <button type="button" onClick={() => addLink(pendingKind)}>
         Add Link
+      </button>
+      <button type="button" onClick={handleCustomShapeImport}>
+        Import STL Mesh
       </button>
       <button
         type="button"
