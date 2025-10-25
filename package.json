@@ -44,6 +44,12 @@
     "extraMetadata": {
       "main": "electron/main.js"
     },
-    "asar": false
+    "asar": false,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
   }
 }

@@ -35,13 +35,18 @@ This generates the Vite production bundle in the `dist/` directory.
 
 ### Package a Windows executable
 
-Install dependencies (once) and run the dist script to produce a 64-bit Windows build:
+Install dependencies (once) and run the dist script to produce both an installer and a portable 64-bit build:
 
 ```bash
 npm run dist
 ```
 
-The command chains the renderer production build and `electron-builder` packaging. The generated `.exe` installer and unpacked app live in the `release/` directory.
+The command chains the renderer production build and `electron-builder` packaging. After it finishes you'll find:
+
+- `Robot Builder Studio Setup <version>.exe` — an NSIS installer suitable for end users.
+- `Robot Builder Studio <version>.exe` — a portable executable that runs without installation.
+
+Both artifacts live in the `release/` directory alongside the unpacked app folder.
 
 ## Features
 
