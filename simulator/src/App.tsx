@@ -37,12 +37,14 @@ const App: React.FC = () => {
     if (typeof window === 'undefined') {
       return;
     }
+
     let dispose: (() => void) | undefined;
+    let pollTimer: ReturnType<typeof window.setInterval> | undefined;
 
     const attachBridge = async () => {
       if (!window.simulatorAPI) {
         setBridgeAvailable(false);
-        return;
+        return false;
       }
 
       setBridgeAvailable(true);
@@ -59,11 +61,36 @@ const App: React.FC = () => {
       } catch (err) {
         console.error('Failed to read TCP status from Electron bridge', err);
       }
+
+      return true;
     };
 
-    attachBridge();
+    const ensureBridge = () => {
+      if (window.simulatorAPI) {
+        attachBridge();
+        return;
+      }
+      setBridgeAvailable(false);
+      if (!pollTimer) {
+        pollTimer = window.setInterval(() => {
+          if (window.simulatorAPI) {
+            attachBridge();
+            if (pollTimer) {
+              window.clearInterval(pollTimer);
+              pollTimer = undefined;
+            }
+          }
+        }, 250);
+      }
+    };
+
+    ensureBridge();
 
     const readyListener = () => {
+      if (pollTimer) {
+        window.clearInterval(pollTimer);
+        pollTimer = undefined;
+      }
       attachBridge();
     };
 
@@ -71,6 +98,9 @@ const App: React.FC = () => {
 
     return () => {
       window.removeEventListener('simulator-api-ready', readyListener);
+      if (pollTimer) {
+        window.clearInterval(pollTimer);
+      }
       dispose?.();
     };
   }, []);
