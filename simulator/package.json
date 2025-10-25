@@ -1,0 +1,55 @@
+{
+  "name": "robot-simulator",
+  "version": "0.1.0",
+  "description": "Interactive kinematic simulator for Robot Builder scenes",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"vite --config vite.config.ts\" \"wait-on http://localhost:5183 && electron .\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dist": "npm run build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "@react-three/drei": "^9.88.11",
+    "@react-three/fiber": "^8.16.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "three": "^0.160.0",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@types/react": "^18.2.63",
+    "@types/react-dom": "^18.2.19",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^28.2.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.8",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.robotbuilder.simulator",
+    "productName": "Robot Builder Simulator",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "asar": false,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  }
+}

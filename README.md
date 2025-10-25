@@ -64,6 +64,20 @@ Both artifacts live in the `release/` directory alongside the unpacked app folde
 - **Persistence** – Save the entire scene graph (including poses, custom meshes, and static rotations) to disk or reload a JSON project using native OS dialogs or browser fallbacks.
 - **Status Bar** – Displays TCP state, current FPS, selection metadata, and whether the app is in connect or simulation mode.
 
+## Standalone Simulator
+
+A separate Electron + React application lives in the `simulator/` directory. It loads saved Robot Builder scenes, solves inverse kinematics while you drag any link, and streams the resulting joint positions over TCP so it can run alongside the main builder UI.
+
+### Run the simulator during development
+
+```bash
+cd simulator
+npm install
+npm run dev
+```
+
+The dev command launches a Vite renderer on port 5183 and attaches an Electron shell. Configure the TCP bridge host/port from the sidebar and drag links in the viewport to stream joint snapshots.
+
 ## TCP Message Format
 
 Send newline-terminated payloads to port `5555`.
