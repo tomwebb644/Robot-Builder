@@ -5,6 +5,8 @@ import { useSceneStore } from '@state/store';
 import type { SceneData, PrimitiveMeshKind, CustomGeometry } from '@state/store';
 import { arrayBufferToBase64 } from '@utils/binary';
 
+const MILLIMETER_TO_METER = 0.001;
+
 const Toolbar: React.FC = () => {
   const addLink = useSceneStore((state) => state.addLink);
   const addCustomLink = useSceneStore((state) => state.addCustomLink);
@@ -89,9 +91,9 @@ const Toolbar: React.FC = () => {
       }
       const bounds = geometry.boundingBox ?? fallbackBounds;
       const size = new THREE.Vector3();
-      bounds.getSize(size);
+      bounds.getSize(size).multiplyScalar(MILLIMETER_TO_METER);
       const center = new THREE.Vector3();
-      bounds.getCenter(center);
+      bounds.getCenter(center).multiplyScalar(MILLIMETER_TO_METER);
       geometry.dispose();
       const baseBounds = {
         width: size.x || 0.3,
@@ -105,6 +107,7 @@ const Toolbar: React.FC = () => {
         sourceName: file.name,
         data: arrayBufferToBase64(buffer),
         scale: 1,
+        unitScale: MILLIMETER_TO_METER,
         bounds: baseBounds,
         originOffset
       };

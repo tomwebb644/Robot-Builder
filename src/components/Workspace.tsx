@@ -109,6 +109,11 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
       const buffer = base64ToArrayBuffer(node.geometry.data);
       const parsed = loader.parse(buffer);
       parsed.computeVertexNormals();
+      const unitScale =
+        node.geometry.unitScale && Number.isFinite(node.geometry.unitScale)
+          ? node.geometry.unitScale
+          : 1;
+      parsed.scale(unitScale, unitScale, unitScale);
       parsed.translate(
         node.geometry.originOffset[0],
         node.geometry.originOffset[1],
