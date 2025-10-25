@@ -6,6 +6,8 @@ import { useSceneStore } from '@state/store';
 import type { MotionAxis, MeshGeometry } from '@state/store';
 import { getGeometryBounds } from '@state/store';
 
+THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
 const axisToVector = (axis: MotionAxis): [number, number, number] => {
   switch (axis) {
     case 'x':
@@ -34,7 +36,7 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
 
   const basePosition = useMemo(() => {
     if (!node.parentId) {
-      return [node.baseOffset[0], bounds.height / 2 + node.baseOffset[1], node.baseOffset[2]] as [
+      return [node.baseOffset[0], node.baseOffset[1], bounds.height / 2 + node.baseOffset[2]] as [
         number,
         number,
         number
@@ -208,10 +210,24 @@ const Workspace: React.FC = () => {
 
   return (
     <div className="workspace-container">
-      <Canvas className="workspace-canvas" camera={{ position: [3, 2.2, 3.6], fov: 50 }} shadows>
+      <Canvas
+        className="workspace-canvas"
+        camera={{ position: [3, 2.2, 3.6], fov: 50 }}
+        shadows
+        onCreated={({ camera, scene }) => {
+          camera.up.set(0, 0, 1);
+          scene.up.set(0, 0, 1);
+        }}
+      >
         <color attach="background" args={['#0f141f']} />
         <ambientLight intensity={0.35} />
-        <directionalLight position={[5, 6, 3]} intensity={1.1} castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048} />
+        <directionalLight
+          position={[5, 3, 6]}
+          intensity={1.1}
+          castShadow
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
+        />
         <Suspense fallback={null}>
           <RobotScene rootId={rootId} />
         </Suspense>
@@ -222,6 +238,7 @@ const Workspace: React.FC = () => {
           cellSize={0.25}
           cellThickness={0.15}
           position={[0, 0, 0]}
+          rotation={[Math.PI / 2, 0, 0]}
         />
         <OrbitControls makeDefault enablePan enableDamping dampingFactor={0.08} />
       </Canvas>

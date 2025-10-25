@@ -63,6 +63,13 @@ export interface GeometryBounds {
   radial: number;
 }
 
+export interface PoseDefinition {
+  id: string;
+  name: string;
+  values: Record<string, number>;
+  createdAt: number;
+}
+
 export interface LinkNode {
   id: string;
   name: string;
@@ -78,6 +85,7 @@ export interface LinkNode {
 export interface SceneData {
   rootId: string;
   nodes: Record<string, LinkNode>;
+  poses?: PoseDefinition[];
 }
 
 const randomColor = () => {
@@ -87,6 +95,82 @@ const randomColor = () => {
 
 let idCounter = 0;
 const createId = (prefix: string) => `${prefix}-${++idCounter}`;
+
+const gatherJointNames = (nodes: Record<string, LinkNode>, ignoreJointId?: string) => {
+  const used = new Set<string>();
+  for (const node of Object.values(nodes)) {
+    for (const joint of node.joints) {
+      if (ignoreJointId && joint.id === ignoreJointId) continue;
+      if (joint.name) {
+        used.add(joint.name);
+      }
+    }
+  }
+  return used;
+};
+
+const nextJointNameFromUsed = (used: Set<string>) => {
+  let index = 1;
+  let candidate = `joint-${index}`;
+  while (used.has(candidate)) {
+    index += 1;
+    candidate = `joint-${index}`;
+  }
+  return candidate;
+};
+
+const getNextJointName = (nodes: Record<string, LinkNode>, additionalNames: Set<string> = new Set()) => {
+  const used = gatherJointNames(nodes);
+  for (const name of additionalNames) {
+    if (name) used.add(name);
+  }
+  return nextJointNameFromUsed(used);
+};
+
+const sanitizeJointName = (
+  nodes: Record<string, LinkNode>,
+  proposed: string,
+  jointId: string,
+  currentName: string
+) => {
+  const trimmed = proposed.trim();
+  if (!trimmed) {
+    return currentName;
+  }
+  const used = gatherJointNames(nodes, jointId);
+  if (used.has(trimmed)) {
+    return null;
+  }
+  return trimmed;
+};
+
+const prunePoseValues = (poses: PoseDefinition[], validNames: Set<string>) =>
+  poses.map((pose) => {
+    const nextValues: Record<string, number> = {};
+    for (const [key, value] of Object.entries(pose.values)) {
+      if (validNames.has(key)) {
+        nextValues[key] = value;
+      }
+    }
+    return { ...pose, values: nextValues };
+  });
+
+const getNextPoseName = (poses: PoseDefinition[]) => {
+  const used = new Set<string>();
+  const pattern = /^Pose (\d+)$/i;
+  for (const pose of poses) {
+    used.add(pose.name);
+    const match = pose.name.match(pattern);
+    if (match) {
+      used.add(`Pose ${Number(match[1])}`);
+    }
+  }
+  let index = 1;
+  while (used.has(`Pose ${index}`)) {
+    index += 1;
+  }
+  return `Pose ${index}`;
+};
 
 const extractNumericSuffix = (value: string) => {
   const match = value.match(/-(\d+)$/);
@@ -101,6 +185,9 @@ const syncCountersFromScene = (scene: SceneData) => {
       maxValue = Math.max(maxValue, extractNumericSuffix(joint.name));
       maxValue = Math.max(maxValue, extractNumericSuffix(joint.id));
     }
+  }
+  for (const pose of scene.poses ?? []) {
+    maxValue = Math.max(maxValue, extractNumericSuffix(pose.id));
   }
   idCounter = Math.max(idCounter, maxValue);
 };
@@ -165,7 +252,7 @@ export const getGeometryBounds = (geometry: MeshGeometry): GeometryBounds => {
 
 export const getDefaultJointPivot = (geometry: MeshGeometry): [number, number, number] => {
   const bounds = getGeometryBounds(geometry);
-  return [0, -bounds.height / 2, 0];
+  return [0, 0, -bounds.height / 2];
 };
 
 export interface SceneState {
@@ -177,6 +264,7 @@ export interface SceneState {
   tcpStatus: string;
   fps: number;
   networkLog: NetworkEvent[];
+  poses: PoseDefinition[];
   simulationPlaying: boolean;
   simulationTime: number;
   addLink: (kind: MeshKind) => void;
@@ -189,6 +277,10 @@ export interface SceneState {
   applyRemoteJointValues: (values: Record<string, number>, source?: NetworkSource) => void;
   exportScene: () => SceneData;
   importScene: (scene: SceneData) => void;
+  addPose: (name?: string) => string;
+  renamePose: (id: string, name: string) => void;
+  removePose: (id: string) => void;
+  applyPose: (id: string) => Record<string, number>;
   updateFps: (fps: number) => void;
   setTcpStatus: (status: string) => void;
   removeLink: (id: string) => void;
@@ -224,6 +316,7 @@ const createDefaultState = (): Pick<
     connectMode: false,
     connectSourceId: undefined,
     networkLog: [],
+    poses: [],
     simulationPlaying: false,
     simulationTime: 0
   };
@@ -234,7 +327,7 @@ const getGeometryHeight = (geometry: MeshGeometry) => getGeometryBounds(geometry
 const computeMountOffset = (parent: LinkNode, child: LinkNode): [number, number, number] => {
   const parentHeight = getGeometryHeight(parent.geometry);
   const childHeight = getGeometryHeight(child.geometry);
-  return [0, parentHeight / 2 + childHeight / 2 + 0.05, 0];
+  return [0, 0, parentHeight / 2 + childHeight / 2 + 0.05];
 };
 
 const isAncestor = (nodes: Record<string, LinkNode>, ancestorId: string, childId: string): boolean => {
@@ -263,8 +356,19 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const jointId = createId('joint');
     const newId = createId('link');
     const parentHeight = parent.geometry ? getGeometryHeight(parent.geometry) : 0.2;
-    const offsetY = parentHeight / 2 + getGeometryHeight(geometry) / 2 + 0.05;
+    const offsetZ = parentHeight / 2 + getGeometryHeight(geometry) / 2 + 0.05;
     const pivot = getDefaultJointPivot(geometry);
+    const jointName = getNextJointName(nodes);
+    const initialJoint: JointDefinition = {
+      id: jointId,
+      type: 'rotational',
+      axis: 'z',
+      limits: [-90, 90],
+      currentValue: 0,
+      name: jointName,
+      externalControl: false,
+      pivot
+    };
 
     const newNode: LinkNode = {
       id: newId,
@@ -282,34 +386,38 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       color: randomColor(),
       parentId,
       children: [],
-      baseOffset: [0, offsetY, 0],
-      joints: [
-        {
-          id: jointId,
-          type: 'rotational',
-          axis: 'z',
-          limits: [-90, 90],
-          currentValue: 0,
-          name: jointId,
-          externalControl: false,
-          pivot
-        }
-      ]
+      baseOffset: [0, 0, offsetZ],
+      joints: [initialJoint]
     };
 
-    set((state) => ({
-      nodes: {
+    set((state) => {
+      const parentNode = state.nodes[parentId];
+      if (!parentNode) {
+        return state;
+      }
+      const nextNodes: Record<string, LinkNode> = {
         ...state.nodes,
         [newId]: newNode,
         [parentId]: {
-          ...state.nodes[parentId],
-          children: [...state.nodes[parentId].children, newId]
+          ...parentNode,
+          children: [...parentNode.children, newId]
         }
-      },
-      selectedId: newId,
-      connectMode: false,
-      connectSourceId: undefined
-    }));
+      };
+      const poses = state.poses.map((pose) => ({
+        ...pose,
+        values: {
+          ...pose.values,
+          [initialJoint.name]: initialJoint.currentValue
+        }
+      }));
+      return {
+        nodes: nextNodes,
+        selectedId: newId,
+        connectMode: false,
+        connectSourceId: undefined,
+        poses
+      };
+    });
   },
   selectNode: (id) => {
     const { connectMode, connectSourceId, completeConnection } = get();
@@ -338,21 +446,44 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const index = node.joints.findIndex((joint) => joint.id === jointId);
       if (index === -1) return state;
       const currentJoint = node.joints[index];
-      const limits = patch.limits ?? currentJoint.limits;
+      const { name: proposedName, ...restPatch } = patch;
+      let nextName = currentJoint.name;
+      if (proposedName !== undefined) {
+        const sanitized = sanitizeJointName(state.nodes, proposedName, jointId, currentJoint.name);
+        if (sanitized === null) {
+          return state;
+        }
+        nextName = sanitized;
+      }
+      const limits = restPatch.limits ?? currentJoint.limits;
       const normalizedLimits: [number, number] =
         limits[0] <= limits[1] ? [limits[0], limits[1]] : [limits[1], limits[0]];
       const valueToClamp =
-        patch.currentValue !== undefined ? patch.currentValue : currentJoint.currentValue;
+        restPatch.currentValue !== undefined ? restPatch.currentValue : currentJoint.currentValue;
       const newValue = Math.min(Math.max(valueToClamp, normalizedLimits[0]), normalizedLimits[1]);
       const nextJoint: JointDefinition = {
         ...currentJoint,
-        ...patch,
+        ...restPatch,
         limits: normalizedLimits,
         currentValue: newValue,
-        pivot: patch.pivot ?? currentJoint.pivot
+        pivot: restPatch.pivot ?? currentJoint.pivot,
+        name: nextName
       };
       const joints = [...node.joints];
       joints[index] = nextJoint;
+      let poses = state.poses;
+      if (nextName !== currentJoint.name) {
+        poses = state.poses.map((pose) => {
+          if (!(currentJoint.name in pose.values)) {
+            return pose;
+          }
+          const values = { ...pose.values };
+          const stored = values[currentJoint.name];
+          delete values[currentJoint.name];
+          values[nextName] = stored;
+          return { ...pose, values };
+        });
+      }
       return {
         nodes: {
           ...state.nodes,
@@ -360,7 +491,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             ...node,
             joints
           }
-        }
+        },
+        poses
       };
     });
   },
@@ -371,13 +503,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const jointId = createId('joint');
       const pivot = getDefaultJointPivot(node.geometry);
       const limits: [number, number] = type === 'linear' ? [0, 150] : [-90, 90];
+      const jointName = getNextJointName(state.nodes);
+      const currentValue = type === 'linear' ? limits[0] : 0;
       const nextJoint: JointDefinition = {
         id: jointId,
         type,
         axis: 'z',
         limits,
-        currentValue: type === 'linear' ? limits[0] : 0,
-        name: jointId,
+        currentValue,
+        name: jointName,
         externalControl: false,
         pivot
       };
@@ -389,7 +523,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             joints: [...node.joints, nextJoint]
           }
         },
-        selectedId: nodeId
+        selectedId: nodeId,
+        poses: state.poses.map((pose) => ({
+          ...pose,
+          values: {
+            ...pose.values,
+            [jointName]: currentValue
+          }
+        }))
       };
     });
   },
@@ -397,8 +538,19 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set((state) => {
       const node = state.nodes[nodeId];
       if (!node) return state;
+      const removed = node.joints.find((joint) => joint.id === jointId);
       const nextJoints = node.joints.filter((joint) => joint.id !== jointId);
       if (nextJoints.length === node.joints.length) return state;
+      const poses = removed
+        ? state.poses.map((pose) => {
+            if (!(removed.name in pose.values)) {
+              return pose;
+            }
+            const values = { ...pose.values };
+            delete values[removed.name];
+            return { ...pose, values };
+          })
+        : state.poses;
       return {
         nodes: {
           ...state.nodes,
@@ -406,7 +558,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             ...node,
             joints: nextJoints
           }
-        }
+        },
+        poses
       };
     });
   },
@@ -447,7 +600,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           const nextOffset = computeMountOffset(nextNode, child);
           updatedNodes[childId] = {
             ...child,
-            baseOffset: [child.baseOffset[0], nextOffset[1], child.baseOffset[2]]
+            baseOffset: [child.baseOffset[0], child.baseOffset[1], nextOffset[2]]
           };
         }
       }
@@ -522,16 +675,20 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     }
   },
   exportScene: () => {
-    const { nodes, rootId } = get();
+    const { nodes, rootId, poses } = get();
     return {
       rootId,
-      nodes
+      nodes,
+      poses
     };
   },
   importScene: (scene) => {
     const normalizedNodes: Record<string, LinkNode> = {};
-    for (const [id, rawNode] of Object.entries(scene.nodes)) {
-      const geometry = rawNode.geometry;
+    const usedJointNames = new Set<string>();
+    const nodeEntries = Object.entries(scene?.nodes ?? {});
+    for (const [id, rawNode] of nodeEntries) {
+      if (!rawNode || typeof rawNode !== 'object') continue;
+      const geometry = (rawNode as any).geometry ?? defaultBox();
       const defaultPivot = getDefaultJointPivot(geometry);
       const rawJoints: any[] = Array.isArray((rawNode as any).joints)
         ? ((rawNode as any).joints as any[])
@@ -554,7 +711,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           number
         ];
         const jointId = typeof entry?.id === 'string' && entry.id.trim() ? entry.id : createId('joint');
-        const name = typeof entry?.name === 'string' && entry.name.trim() ? entry.name : jointId;
+        let name = typeof entry?.name === 'string' && entry.name.trim() ? entry.name.trim() : jointId;
+        if (!name || usedJointNames.has(name)) {
+          name = nextJointNameFromUsed(usedJointNames);
+        }
+        usedJointNames.add(name);
         return {
           id: jointId,
           name,
@@ -567,31 +728,173 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         };
       });
       normalizedNodes[id] = {
-        id: rawNode.id ?? id,
-        name: rawNode.name ?? id,
+        id: (rawNode as any).id ?? id,
+        name: (rawNode as any).name ?? id,
         geometry,
-        color: rawNode.color ?? randomColor(),
-        parentId: rawNode.parentId,
-        children: Array.isArray(rawNode.children) ? rawNode.children : [],
+        color: (rawNode as any).color ?? randomColor(),
+        parentId: (rawNode as any).parentId,
+        children: Array.isArray((rawNode as any).children) ? (rawNode as any).children : [],
         baseOffset:
-          Array.isArray(rawNode.baseOffset) && rawNode.baseOffset.length === 3
+          Array.isArray((rawNode as any).baseOffset) && (rawNode as any).baseOffset.length === 3
             ? [
-                Number(rawNode.baseOffset[0]),
-                Number(rawNode.baseOffset[1]),
-                Number(rawNode.baseOffset[2])
+                Number((rawNode as any).baseOffset[0]),
+                Number((rawNode as any).baseOffset[1]),
+                Number((rawNode as any).baseOffset[2])
               ]
             : [0, 0, 0],
         joints,
-        notes: rawNode.notes
+        notes: (rawNode as any).notes
       };
     }
-    const normalizedScene: SceneData = { ...scene, nodes: normalizedNodes };
+    const validJointNames = gatherJointNames(normalizedNodes);
+    const normalizedPoses: PoseDefinition[] = [];
+    const usedPoseNames = new Set<string>();
+    const poseEntries = Array.isArray(scene?.poses) ? scene.poses : [];
+    for (const entry of poseEntries) {
+      if (!entry || typeof entry !== 'object') continue;
+      const poseId = typeof (entry as any).id === 'string' && (entry as any).id.trim() ? (entry as any).id : createId('pose');
+      let poseName =
+        typeof (entry as any).name === 'string' && (entry as any).name.trim()
+          ? (entry as any).name.trim()
+          : getNextPoseName(normalizedPoses);
+      if (!poseName) {
+        poseName = getNextPoseName(normalizedPoses);
+      }
+      if (usedPoseNames.has(poseName)) {
+        const baseName = poseName;
+        let suffix = 2;
+        let candidate = `${baseName} (${suffix})`;
+        while (usedPoseNames.has(candidate)) {
+          suffix += 1;
+          candidate = `${baseName} (${suffix})`;
+        }
+        poseName = candidate;
+      }
+      usedPoseNames.add(poseName);
+      const rawValues =
+        (entry as any).values && typeof (entry as any).values === 'object' ? (entry as any).values : {};
+      const values: Record<string, number> = {};
+      for (const [key, value] of Object.entries(rawValues)) {
+        if (!validJointNames.has(key)) continue;
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) {
+          values[key] = numeric;
+        }
+      }
+      normalizedPoses.push({
+        id: poseId,
+        name: poseName,
+        values,
+        createdAt:
+          typeof (entry as any).createdAt === 'number' && Number.isFinite((entry as any).createdAt)
+            ? (entry as any).createdAt
+            : Date.now()
+      });
+    }
+    const normalizedScene: SceneData = { ...scene, nodes: normalizedNodes, poses: normalizedPoses };
     syncCountersFromScene(normalizedScene);
+    const desiredRootId =
+      normalizedScene.rootId && normalizedNodes[normalizedScene.rootId]
+        ? normalizedScene.rootId
+        : Object.keys(normalizedNodes)[0] ?? get().rootId;
     set(() => ({
       nodes: normalizedNodes,
-      rootId: normalizedScene.rootId,
-      selectedId: normalizedScene.rootId
+      poses: normalizedPoses,
+      rootId: desiredRootId,
+      selectedId: desiredRootId,
+      connectMode: false,
+      connectSourceId: undefined
     }));
+  },
+  addPose: (name) => {
+    const state = get();
+    const poseId = createId('pose');
+    const trimmed = typeof name === 'string' ? name.trim() : '';
+    const usedNames = new Set(state.poses.map((pose) => pose.name));
+    let poseName = trimmed;
+    if (!poseName) {
+      poseName = getNextPoseName(state.poses);
+    } else if (usedNames.has(poseName)) {
+      let suffix = 2;
+      let candidate = `${poseName} (${suffix})`;
+      while (usedNames.has(candidate)) {
+        suffix += 1;
+        candidate = `${poseName} (${suffix})`;
+      }
+      poseName = candidate;
+    }
+    const values: Record<string, number> = {};
+    for (const node of Object.values(state.nodes)) {
+      for (const joint of node.joints) {
+        values[joint.name] = joint.currentValue;
+      }
+    }
+    const pose: PoseDefinition = {
+      id: poseId,
+      name: poseName,
+      values,
+      createdAt: Date.now()
+    };
+    set((current) => ({ poses: [...current.poses, pose] }));
+    return poseId;
+  },
+  renamePose: (id, name) => {
+    set((state) => {
+      const index = state.poses.findIndex((pose) => pose.id === id);
+      if (index === -1) return state;
+      const trimmed = name.trim();
+      if (!trimmed) return state;
+      if (state.poses.some((pose, idx) => idx !== index && pose.name === trimmed)) {
+        return state;
+      }
+      const poses = [...state.poses];
+      poses[index] = { ...poses[index], name: trimmed };
+      return { poses };
+    });
+  },
+  removePose: (id) => {
+    set((state) => {
+      const poses = state.poses.filter((pose) => pose.id !== id);
+      if (poses.length === state.poses.length) return state;
+      return { poses };
+    });
+  },
+  applyPose: (id) => {
+    const state = get();
+    const pose = state.poses.find((entry) => entry.id === id);
+    if (!pose) {
+      return {};
+    }
+    const nextNodes: Record<string, LinkNode> = { ...state.nodes };
+    const changed: Record<string, number> = {};
+    let mutated = false;
+    for (const node of Object.values(state.nodes)) {
+      if (!node.joints.length) continue;
+      let nodeChanged = false;
+      const joints = node.joints.map((joint) => {
+        const target = pose.values[joint.name];
+        if (typeof target !== 'number') {
+          return joint;
+        }
+        const [min, max] = joint.limits;
+        const clamped = Math.min(Math.max(target, min), max);
+        if (clamped !== joint.currentValue) {
+          nodeChanged = true;
+          changed[joint.name] = clamped;
+          return { ...joint, currentValue: clamped };
+        }
+        return joint;
+      });
+      if (nodeChanged) {
+        nextNodes[node.id] = { ...node, joints };
+        mutated = true;
+      }
+    }
+    if (!mutated) {
+      return {};
+    }
+    set({ nodes: nextNodes });
+    return changed;
   },
   updateFps: (fps) => set({ fps }),
   setTcpStatus: (status) => set({ tcpStatus: status }),
@@ -602,12 +905,16 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       }
       const nodes = { ...state.nodes };
       const toRemove = [id];
+      const removedJointNames = new Set<string>();
       while (toRemove.length > 0) {
         const currentId = toRemove.pop();
         if (!currentId) continue;
         const currentNode = nodes[currentId];
         if (!currentNode) continue;
         toRemove.push(...currentNode.children);
+        for (const joint of currentNode.joints) {
+          removedJointNames.add(joint.name);
+        }
         delete nodes[currentId];
       }
       const parentId = state.nodes[id]?.parentId;
@@ -617,11 +924,28 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           children: nodes[parentId].children.filter((child) => child !== id)
         };
       }
+      const poses = removedJointNames.size
+        ? prunePoseValues(
+            state.poses.map((pose) => {
+              let changed = false;
+              const values = { ...pose.values };
+              for (const name of removedJointNames) {
+                if (name in values) {
+                  delete values[name];
+                  changed = true;
+                }
+              }
+              return changed ? { ...pose, values } : pose;
+            }),
+            gatherJointNames(nodes)
+          )
+        : state.poses;
       return {
         nodes,
         selectedId: parentId ?? state.rootId,
         connectMode: false,
-        connectSourceId: undefined
+        connectSourceId: undefined,
+        poses
       };
     });
   },

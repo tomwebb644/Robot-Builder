@@ -35,15 +35,16 @@ This generates the Vite production bundle in the `dist/` directory. Packaging fo
 
 ## Features
 
-- **3D Scene Workspace** – Real-time Three.js viewport with orbit controls, grid, and recursive link rendering. Selected joints render motion arcs/rails for instant visual feedback.
-- **Transform Gizmos** – Drag any selected link with snap-enabled translation gizmos to fine tune mount offsets directly in the viewport.
+- **3D Scene Workspace** – Real-time Three.js viewport with orbit controls, a Z-up world frame, and recursive link rendering. Selected joints render motion arcs/rails for instant visual feedback.
+- **Inspector-Driven Offsets** – Adjust geometry, base offsets, joint pivots, and limits numerically with scrollable/typed inputs—no accidental viewport dragging.
 - **Link Hierarchy & Inspector** – Select any link to tune geometry, offsets, joint configuration, and notes, or remove entire subtrees safely.
 - **Connect Mode** – Toggle connect mode in the toolbar to re-parent links via the outline or the 3D viewport, with cycle protection and automatic snap offsets.
-- **Motion Control Panel** – Slider per joint with min/max enforcement, unit display, external control toggles, and live TCP broadcasting of local changes.
+- **Motion Control Panel** – Slider per joint with min/max enforcement, unit display, external control toggles, and live TCP broadcasting of local changes. Quick min/reset/max buttons provide instant snaps.
+- **Pose Library** – Capture, rename, recall, or remove project-specific joint poses to validate repeatable setups instantly.
 - **Network Console** – Built-in testbench for parsing payloads, injecting local joint updates, broadcasting to TCP clients, and inspecting RX/TX logs.
 - **Motion Simulation** – One-click simulated playback drives joints with smooth sinusoidal motion for presentation or sanity checks.
 - **TCP Bridge** – Electron main process hosts a TCP server on port 5555 that streams joint updates to the renderer. Incoming JSON/CSV-style payloads (terminated by newlines) update joints that opt into external control.
-- **Persistence** – Save the entire scene graph to disk or reload a JSON project using native OS dialogs.
+- **Persistence** – Save the entire scene graph (including poses) to disk or reload a JSON project using native OS dialogs.
 - **Status Bar** – Displays TCP state, current FPS, selection metadata, and whether the app is in connect or simulation mode.
 
 ## TCP Message Format
@@ -86,11 +87,19 @@ Scenes serialize to JSON with the following shape:
       "children": ["link-2"],
       "baseOffset": [0, 0, 0]
     }
-  }
+  },
+  "poses": [
+    {
+      "id": "pose-7",
+      "name": "Pose 1",
+      "values": { "joint-1": 0, "joint-2": 45 },
+      "createdAt": 1731542400000
+    }
+  ]
 }
 ```
 
-Each child link stores its parent reference, mount offset, joint definition (if applicable), and optional notes.
+Each child link stores its parent reference, mount offset, joint definition (if applicable), and optional notes. Mount offsets use `[x, y, z]` meters with the Z axis pointing up. Captured poses record joint values by name and are preserved when exporting/importing projects.
 
 ## Roadmap Ideas
 

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useSceneStore } from '@state/store';
 import SceneOutline from './SceneOutline';
 import NetworkConsole from './NetworkConsole';
+import PoseLibrary from './PoseLibrary';
 
 const ControlPanel: React.FC = () => {
   const nodes = useSceneStore((state) => state.nodes);
@@ -107,6 +108,9 @@ const ControlPanel: React.FC = () => {
             );
           })
         )}
+      </div>
+      <div className="panel-section">
+        <PoseLibrary />
       </div>
       <div className="panel-section">
         <SceneOutline />
