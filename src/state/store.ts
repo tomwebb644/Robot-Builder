@@ -119,8 +119,23 @@ const nextJointNameFromUsed = (used: Set<string>) => {
   return candidate;
 };
 
-const getNextJointName = (nodes: Record<string, LinkNode>, additionalNames: Set<string> = new Set()) => {
+const getNextJointName = (
+  nodes: Record<string, LinkNode>,
+  additionalNames: Set<string> = new Set()
+) => {
   const used = gatherJointNames(nodes);
+  for (const name of additionalNames) {
+    if (name) used.add(name);
+  }
+  return nextJointNameFromUsed(used);
+};
+
+const getNextJointNameFor = (
+  nodes: Record<string, LinkNode>,
+  jointId?: string,
+  additionalNames: Set<string> = new Set()
+) => {
+  const used = gatherJointNames(nodes, jointId);
   for (const name of additionalNames) {
     if (name) used.add(name);
   }
@@ -274,6 +289,7 @@ export interface SceneState {
   removeJoint: (nodeId: string, jointId: string) => void;
   updateNode: (id: string, patch: Partial<Omit<LinkNode, 'id' | 'children' | 'joints'>>) => void;
   toggleExternalControl: (nodeId: string, jointId: string, enabled: boolean) => void;
+  applyInterpolatedJointValues: (values: Record<string, number>) => void;
   applyRemoteJointValues: (values: Record<string, number>, source?: NetworkSource) => void;
   exportScene: () => SceneData;
   importScene: (scene: SceneData) => void;
@@ -451,9 +467,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       if (proposedName !== undefined) {
         const sanitized = sanitizeJointName(state.nodes, proposedName, jointId, currentJoint.name);
         if (sanitized === null) {
-          return state;
+          nextName = getNextJointNameFor(state.nodes, jointId);
+        } else {
+          nextName = sanitized;
         }
-        nextName = sanitized;
       }
       const limits = restPatch.limits ?? currentJoint.limits;
       const normalizedLimits: [number, number] =
@@ -629,6 +646,40 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           }
         }
       };
+    });
+  },
+  applyInterpolatedJointValues: (values) => {
+    set((state) => {
+      const updated: Record<string, LinkNode> = { ...state.nodes };
+      let changed = false;
+      for (const node of Object.values(state.nodes)) {
+        if (!node.joints.length) continue;
+        let nodeChanged = false;
+        const joints = node.joints.map((joint) => {
+          const nextValue = values[joint.name];
+          if (typeof nextValue !== 'number') {
+            return joint;
+          }
+          const [min, max] = joint.limits;
+          const clamped = Math.min(Math.max(nextValue, min), max);
+          if (Math.abs(clamped - joint.currentValue) > 0.0001) {
+            nodeChanged = true;
+            return {
+              ...joint,
+              currentValue: clamped
+            };
+          }
+          return joint;
+        });
+        if (nodeChanged) {
+          updated[node.id] = {
+            ...node,
+            joints
+          };
+          changed = true;
+        }
+      }
+      return changed ? { nodes: updated } : state;
     });
   },
   applyRemoteJointValues: (values, source = 'tcp') => {

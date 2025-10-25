@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSceneStore } from '@state/store';
 import type {
   JointDefinition,
@@ -26,6 +26,52 @@ const InspectorPanel: React.FC = () => {
   const rootId = useSceneStore((state) => state.rootId);
 
   const node = selectedId ? nodes[selectedId] : undefined;
+
+  const [jointNameDrafts, setJointNameDrafts] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!node) {
+      setJointNameDrafts({});
+      return;
+    }
+    setJointNameDrafts((current) => {
+      const next: Record<string, string> = {};
+      for (const joint of node.joints) {
+        if (current[joint.id] !== undefined) {
+          next[joint.id] = current[joint.id];
+        }
+      }
+      return next;
+    });
+  }, [node]);
+
+  const handleJointNameChange = useCallback((jointId: string, value: string) => {
+    setJointNameDrafts((current) => ({ ...current, [jointId]: value }));
+  }, []);
+
+  const handleJointNameCommit = useCallback(
+    (linkId: string, jointId: string, fallback: string) => {
+      const draft = jointNameDrafts[jointId];
+      const nameToApply = draft !== undefined ? draft.trim() : fallback;
+      if (nameToApply) {
+        updateJoint(linkId, jointId, { name: nameToApply });
+      }
+      setJointNameDrafts((current) => {
+        const next = { ...current };
+        delete next[jointId];
+        return next;
+      });
+    },
+    [jointNameDrafts, updateJoint]
+  );
+
+  const handleJointNameCancel = useCallback((jointId: string) => {
+    setJointNameDrafts((current) => {
+      const next = { ...current };
+      delete next[jointId];
+      return next;
+    });
+  }, []);
 
   const onGeometryChange = (geometry: MeshGeometry) => {
     if (!node) return;
@@ -313,8 +359,19 @@ const InspectorPanel: React.FC = () => {
                     Joint Name
                     <input
                       type="text"
-                      value={joint.name}
-                      onChange={(event) => updateJoint(node.id, joint.id, { name: event.target.value })}
+                      value={jointNameDrafts[joint.id] ?? joint.name}
+                      onChange={(event) => handleJointNameChange(joint.id, event.target.value)}
+                      onBlur={() => handleJointNameCommit(node.id, joint.id, joint.name)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          handleJointNameCommit(node.id, joint.id, joint.name);
+                        }
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          handleJointNameCancel(joint.id);
+                        }
+                      }}
                     />
                   </label>
                   <label>
