@@ -15,6 +15,12 @@ const api = {
   loadScene() {
     return ipcRenderer.invoke('load-scene');
   },
+  writeAutosave(scene) {
+    return ipcRenderer.invoke('write-autosave', scene);
+  },
+  loadAutosave() {
+    return ipcRenderer.invoke('load-autosave');
+  },
   log(message) {
     ipcRenderer.send('log-info', message);
   }

@@ -194,7 +194,7 @@ const Toolbar: React.FC = () => {
         Load Scene
       </button>
       <button type="button" onClick={resetScene}>
-        Reset
+        Clear Scene
       </button>
     </div>
   );
