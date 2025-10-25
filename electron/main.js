@@ -12,6 +12,8 @@ const tcpClients = new Set();
 
 const isDev = !app.isPackaged;
 
+const getAutosavePath = () => path.join(app.getPath('userData'), 'robot-builder-autosave.json');
+
 const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -156,6 +158,31 @@ ipcMain.handle('load-scene', async () => {
   }
   const content = await fs.readFile(filePaths[0], 'utf-8');
   return { success: true, scene: JSON.parse(content) };
+});
+
+ipcMain.handle('write-autosave', async (_event, scene) => {
+  try {
+    const autosavePath = getAutosavePath();
+    await fs.mkdir(path.dirname(autosavePath), { recursive: true });
+    await fs.writeFile(autosavePath, JSON.stringify(scene, null, 2), 'utf-8');
+    return { success: true, filePath: autosavePath };
+  } catch (error) {
+    console.error('Failed to write autosave', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('load-autosave', async () => {
+  try {
+    const autosavePath = getAutosavePath();
+    const content = await fs.readFile(autosavePath, 'utf-8');
+    return { success: true, scene: JSON.parse(content), filePath: autosavePath };
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.error('Failed to load autosave', error);
+    }
+    return { success: false };
+  }
 });
 
 ipcMain.on('log-info', (_event, message) => {
