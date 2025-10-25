@@ -138,23 +138,50 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
     ] as [number, number, number];
   }, [node.staticRotation]);
 
-  const geometryElement = useMemo(() => {
+  const { geometryElement, meshRotation } = useMemo(() => {
     const geometry: MeshGeometry = node.geometry;
+    const baseRotation: [number, number, number] = [0, 0, 0];
+
     switch (geometry.kind) {
       case 'box':
-        return <boxGeometry args={[geometry.width, geometry.depth, geometry.height]} />;
+        return {
+          geometryElement: <boxGeometry args={[geometry.width, geometry.depth, geometry.height]} />,
+          meshRotation: baseRotation
+        };
       case 'cylinder':
-        return <cylinderGeometry args={[geometry.radius, geometry.radius, geometry.height, 32]} />;
+        return {
+          geometryElement: (
+            <cylinderGeometry args={[geometry.radius, geometry.radius, geometry.height, 32]} />
+          ),
+          meshRotation: [Math.PI / 2, 0, 0] as [number, number, number]
+        };
       case 'sphere':
-        return <sphereGeometry args={[geometry.radius, 32, 32]} />;
+        return {
+          geometryElement: <sphereGeometry args={[geometry.radius, 32, 32]} />,
+          meshRotation: baseRotation
+        };
       case 'cone':
-        return <coneGeometry args={[geometry.radius, geometry.height, 32]} />;
+        return {
+          geometryElement: <coneGeometry args={[geometry.radius, geometry.height, 32]} />,
+          meshRotation: [Math.PI / 2, 0, 0] as [number, number, number]
+        };
       case 'capsule':
-        return <capsuleGeometry args={[geometry.radius, geometry.length, 8, 16]} />;
+        return {
+          geometryElement: <capsuleGeometry args={[geometry.radius, geometry.length, 8, 16]} />,
+          meshRotation: [Math.PI / 2, 0, 0] as [number, number, number]
+        };
       case 'custom':
-        return customGeometry ? <primitive object={customGeometry} attach="geometry" /> : null;
+        return {
+          geometryElement: customGeometry ? (
+            <primitive object={customGeometry} attach="geometry" />
+          ) : null,
+          meshRotation: baseRotation
+        };
       default:
-        return null;
+        return {
+          geometryElement: null,
+          meshRotation: baseRotation
+        };
     }
   }, [node.geometry, customGeometry]);
 
@@ -166,6 +193,7 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
         onPointerDown={handlePointerDown}
         onPointerOver={handlePointerOver}
         onPointerOut={handlePointerOut}
+        rotation={meshRotation}
       >
         {geometryElement}
         <meshStandardMaterial color={materialColor} emissive={emissive} roughness={0.4} metalness={0.15} />
