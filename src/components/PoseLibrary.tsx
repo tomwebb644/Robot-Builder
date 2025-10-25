@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSceneStore } from '@state/store';
-import type { PoseDefinition } from '@state/store';
+import type { NetworkSource, PoseDefinition } from '@state/store';
 
 const TRANSITION_DURATION = 2.5;
 const HOLD_DURATION = 0.6;
@@ -22,6 +22,7 @@ const PoseLibrary: React.FC = () => {
   const [pendingPoseId, setPendingPoseId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [currentPoseId, setCurrentPoseId] = useState<string | null>(null);
 
   const playingRef = useRef(false);
   const playbackRef = useRef<{
@@ -29,12 +30,12 @@ const PoseLibrary: React.FC = () => {
     index: number;
     startValues: Record<string, number>;
     targetValues: Record<string, number>;
+    targetPoseId: string | null;
     elapsed: number;
     duration: number;
-    lastTimestamp: number | null;
-    holding: boolean;
-    holdElapsed: number;
     holdDuration: number;
+    lastTimestamp: number | null;
+    phase: 'transition' | 'hold';
   } | null>(null);
   const draggingIdRef = useRef<string | null>(null);
 
@@ -42,7 +43,24 @@ const PoseLibrary: React.FC = () => {
     playingRef.current = false;
     playbackRef.current = null;
     setIsPlaying(false);
+    setCurrentPoseId(null);
   }, []);
+
+  const emitJointValues = useCallback(
+    (values: Record<string, number>, source: NetworkSource) => {
+      if (!values || Object.keys(values).length === 0) {
+        return;
+      }
+      const api = (window as any).api;
+      if (api && typeof api.sendJointValue === 'function') {
+        for (const [joint, value] of Object.entries(values)) {
+          api.sendJointValue({ joint, value });
+        }
+      }
+      logNetworkEvent('outgoing', values, source);
+    },
+    [logNetworkEvent]
+  );
 
   const handleCapture = () => {
     stopPlayback();
@@ -60,10 +78,7 @@ const PoseLibrary: React.FC = () => {
     if (Object.keys(changed).length === 0) {
       return;
     }
-    for (const [joint, value] of Object.entries(changed)) {
-      window.api.sendJointValue({ joint, value });
-    }
-    logNetworkEvent('outgoing', changed, 'manual');
+    emitJointValues(changed, 'manual');
   };
 
   const captureCurrentJointValues = useCallback(() => {
@@ -110,15 +125,16 @@ const PoseLibrary: React.FC = () => {
       index: 0,
       startValues,
       targetValues,
+      targetPoseId: firstPose.id,
       elapsed: 0,
       duration: TRANSITION_DURATION,
+      holdDuration: HOLD_DURATION,
       lastTimestamp: null,
-      holding: false,
-      holdElapsed: 0,
-      holdDuration: HOLD_DURATION
+      phase: 'transition'
     };
     playingRef.current = true;
     setIsPlaying(true);
+    setCurrentPoseId(firstPose.id);
   }, [poses, captureCurrentJointValues, computeTargetValues]);
 
   useEffect(() => {
@@ -128,22 +144,76 @@ const PoseLibrary: React.FC = () => {
     let frameId: number;
     const step = (timestamp: number) => {
       const state = playbackRef.current;
-      if (!state || !playingRef.current || state.order.length === 0) {
+      if (!state || !playingRef.current) {
         stopPlayback();
         return;
       }
-      if (state.lastTimestamp === null) {
-        state.lastTimestamp = timestamp;
+
+      const posesSnapshot = useSceneStore.getState().poses;
+      if (!posesSnapshot.length) {
+        stopPlayback();
+        return;
       }
-      const delta = (timestamp - state.lastTimestamp) / 1000;
-      state.lastTimestamp = timestamp;
-      if (state.holding) {
-        state.holdElapsed += delta;
-        if (state.holdElapsed >= state.holdDuration) {
-          state.holding = false;
-          state.holdElapsed = 0;
+
+      state.order = posesSnapshot.map((pose) => pose.id);
+      if (!state.order.length) {
+        stopPlayback();
+        return;
+      }
+
+      if (!state.targetPoseId || !state.order.includes(state.targetPoseId)) {
+        state.index = 0;
+        const fallbackId = state.order[0];
+        const fallbackPose = posesSnapshot.find((pose) => pose.id === fallbackId);
+        const baseline = captureCurrentJointValues();
+        if (fallbackPose) {
+          state.startValues = baseline;
+          state.targetValues = computeTargetValues(fallbackPose, baseline);
+          state.targetPoseId = fallbackPose.id;
+          state.phase = 'transition';
           state.elapsed = 0;
           state.lastTimestamp = timestamp;
+          setCurrentPoseId(fallbackPose.id);
+        }
+      } else {
+        state.index = state.order.indexOf(state.targetPoseId);
+      }
+
+      if (state.lastTimestamp === null) {
+        state.lastTimestamp = timestamp;
+        if (playingRef.current) {
+          frameId = requestAnimationFrame(step);
+        }
+        return;
+      }
+
+      const delta = (timestamp - state.lastTimestamp) / 1000;
+      state.lastTimestamp = timestamp;
+
+      if (state.phase === 'hold') {
+        state.elapsed += delta;
+        if (state.elapsed >= state.holdDuration) {
+          const nextOrder = state.order.length ? state.order : posesSnapshot.map((pose) => pose.id);
+          if (!nextOrder.length) {
+            stopPlayback();
+            return;
+          }
+          const nextIndex = (state.index + 1) % nextOrder.length;
+          const nextPoseId = nextOrder[nextIndex];
+          const nextPose = posesSnapshot.find((pose) => pose.id === nextPoseId);
+          if (!nextPose) {
+            stopPlayback();
+            return;
+          }
+          const baseline = captureCurrentJointValues();
+          state.index = nextIndex;
+          state.startValues = baseline;
+          state.targetValues = computeTargetValues(nextPose, baseline);
+          state.targetPoseId = nextPose.id;
+          state.phase = 'transition';
+          state.elapsed = 0;
+          state.lastTimestamp = timestamp;
+          setCurrentPoseId(nextPose.id);
         }
       } else {
         state.elapsed += delta;
@@ -170,37 +240,13 @@ const PoseLibrary: React.FC = () => {
         }
         if (progress >= 1) {
           const finalValues = captureCurrentJointValues();
-          if (Object.keys(finalValues).length > 0) {
-            for (const [joint, value] of Object.entries(finalValues)) {
-              window.api.sendJointValue({ joint, value });
-            }
-            logNetworkEvent('outgoing', finalValues, 'playback');
-          }
-          const latestPoses = useSceneStore.getState().poses;
-          state.order = state.order.filter((id) => latestPoses.some((pose) => pose.id === id));
-          if (state.order.length === 0) {
-            state.order = latestPoses.map((pose) => pose.id);
-          }
-          if (state.order.length === 0) {
-            stopPlayback();
-            return;
-          }
-          const nextIndex = (state.index + 1) % state.order.length;
-          const nextPoseId = state.order[nextIndex];
-          const nextPose = latestPoses.find((pose) => pose.id === nextPoseId);
-          if (!nextPose) {
-            stopPlayback();
-            return;
-          }
-          state.index = nextIndex;
-          state.startValues = finalValues;
-          state.targetValues = computeTargetValues(nextPose, finalValues);
+          emitJointValues(finalValues, 'playback');
+          state.phase = 'hold';
           state.elapsed = 0;
-          state.holding = true;
-          state.holdElapsed = 0;
           state.lastTimestamp = timestamp;
         }
       }
+
       if (playingRef.current) {
         frameId = requestAnimationFrame(step);
       }
@@ -210,9 +256,9 @@ const PoseLibrary: React.FC = () => {
   }, [
     isPlaying,
     applyInterpolatedJointValues,
+    emitJointValues,
     captureCurrentJointValues,
     computeTargetValues,
-    logNetworkEvent,
     stopPlayback
   ]);
 
@@ -227,27 +273,6 @@ const PoseLibrary: React.FC = () => {
       setPendingPoseId(null);
     }
   }, [poses, pendingPoseId]);
-
-  useEffect(() => {
-    if (!playbackRef.current) {
-      return;
-    }
-    const state = playbackRef.current;
-    const latestOrder = poses.map((pose) => pose.id);
-    if (latestOrder.length === 0) {
-      state.order = [];
-      state.index = 0;
-      return;
-    }
-    const currentId = state.order[state.index];
-    state.order = latestOrder;
-    if (currentId) {
-      const nextIndex = latestOrder.indexOf(currentId);
-      state.index = nextIndex === -1 ? 0 : nextIndex;
-    } else {
-      state.index = 0;
-    }
-  }, [poses]);
 
   const beginRename = (poseId: string, name: string) => {
     setEditingId(poseId);
@@ -395,10 +420,12 @@ const PoseLibrary: React.FC = () => {
               const isEditing = editingId === pose.id;
               const isDraggingItem = draggingId === pose.id;
               const isDragOverItem = dragOverId === pose.id && draggingId !== pose.id;
+              const isCurrent = currentPoseId === pose.id && isPlaying;
               const itemClass = [
                 'pose-item',
                 isDraggingItem ? 'dragging' : '',
-                isDragOverItem ? 'drag-over' : ''
+                isDragOverItem ? 'drag-over' : '',
+                isCurrent ? 'current' : ''
               ]
                 .filter(Boolean)
                 .join(' ');

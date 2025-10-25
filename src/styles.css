@@ -300,6 +300,16 @@ textarea {
   cursor: grab;
 }
 
+.pose-item.current {
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+  background: rgba(30, 41, 59, 0.85);
+}
+
+.pose-item.current .pose-name-button {
+  color: #38bdf8;
+}
+
 .pose-item.dragging {
   opacity: 0.65;
   cursor: grabbing;
