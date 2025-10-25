@@ -17,13 +17,19 @@ npm install
 
 ### Development
 
-Run the renderer dev server and launch the Electron shell:
+Run the main builder renderer dev server and launch the Electron shell:
 
 ```bash
 npm run dev
 ```
 
-The command runs Vite and automatically opens the Electron window once the dev server is ready.
+The command proxies to `npm run dev:studio`, which runs Vite and automatically opens the Electron window once the dev server is ready.
+
+To launch the builder and the standalone simulator at the same time, run:
+
+```bash
+npm run dev:both
+```
 
 ### Build static assets
 
@@ -63,6 +69,20 @@ Both artifacts live in the `release/` directory alongside the unpacked app folde
 - **TCP Bridge** – Electron main process hosts a TCP server on port 5555 that streams joint updates to the renderer. Incoming JSON/CSV-style payloads (terminated by newlines) update joints that opt into external control.
 - **Persistence** – Save the entire scene graph (including poses, custom meshes, and static rotations) to disk or reload a JSON project using native OS dialogs or browser fallbacks.
 - **Status Bar** – Displays TCP state, current FPS, selection metadata, and whether the app is in connect or simulation mode.
+
+## Standalone Simulator
+
+A separate Electron + React application lives in the `simulator/` directory. It loads saved Robot Builder scenes, solves inverse kinematics while you drag any link, and streams the resulting joint positions over TCP so it can run alongside the main builder UI.
+
+### Run the simulator during development
+
+```bash
+cd simulator
+npm install
+npm run dev
+```
+
+The dev command launches a Vite renderer on port 5183 and attaches an Electron shell. Configure the TCP bridge host/port from the sidebar and drag links in the viewport to stream joint snapshots. If you open the dev server URL in a regular browser tab you'll see a notice that TCP streaming is unavailable—launching the Electron shell (either with `npm run dev` inside `simulator/` or `npm run dev:both` from the repository root) is required for socket access.
 
 ## TCP Message Format
 
