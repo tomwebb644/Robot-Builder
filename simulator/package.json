@@ -1,14 +1,11 @@
 {
-  "name": "robot-builder",
+  "name": "robot-simulator",
   "version": "0.1.0",
-  "description": "Modular kinematic visualization and control studio",
+  "description": "Interactive kinematic simulator for Robot Builder scenes",
   "main": "electron/main.js",
   "type": "module",
   "scripts": {
-    "dev": "npm run dev:studio",
-    "dev:studio": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "dev:simulator": "npm --prefix simulator run dev",
-    "dev:both": "concurrently \"npm run dev:studio\" \"npm run dev:simulator\"",
+    "dev": "concurrently \"vite --config vite.config.ts\" \"wait-on http://localhost:5183 && electron .\"",
     "build": "vite build",
     "preview": "vite preview",
     "dist": "npm run build && electron-builder --win --x64"
@@ -34,8 +31,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.robotbuilder.studio",
-    "productName": "Robot Builder Studio",
+    "appId": "com.robotbuilder.simulator",
+    "productName": "Robot Builder Simulator",
     "directories": {
       "output": "release"
     },
