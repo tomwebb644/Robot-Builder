@@ -29,11 +29,19 @@ const App: React.FC = () => {
   const [port, setPort] = useState(5555);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [bridgeAvailable, setBridgeAvailable] = useState(
+    () => typeof window !== 'undefined' && Boolean(window.simulatorAPI)
+  );
 
   useEffect(() => {
-    if (!window.simulatorAPI) {
+    if (typeof window === 'undefined') {
       return;
     }
+    if (!window.simulatorAPI) {
+      setBridgeAvailable(false);
+      return;
+    }
+    setBridgeAvailable(true);
     const dispose = window.simulatorAPI.onTcpStatus((payload) => {
       setStatus(payload);
     });
@@ -69,8 +77,10 @@ const App: React.FC = () => {
   }, []);
 
   const handleConnect = useCallback(async () => {
-    if (!window.simulatorAPI) {
-      setError('TCP bridge is unavailable in this environment.');
+    if (!bridgeAvailable || !window.simulatorAPI) {
+      setError(
+        'The TCP bridge requires the Electron shell. Launch the simulator with "npm run dev" inside simulator/ or use "npm run dev:both" from the repository root.'
+      );
       return;
     }
     setError(null);
@@ -78,7 +88,7 @@ const App: React.FC = () => {
     if (!result.success && result.error) {
       setError(result.error);
     }
-  }, [host, port]);
+  }, [bridgeAvailable, host, port]);
 
   const handleDisconnect = useCallback(async () => {
     if (!window.simulatorAPI) {
@@ -86,6 +96,9 @@ const App: React.FC = () => {
     }
     await window.simulatorAPI.disconnectTcp();
   }, []);
+
+  const connectDisabled = status.status === 'connecting' || !bridgeAvailable;
+  const disconnectDisabled = status.status === 'disconnected' || !bridgeAvailable;
 
   return (
     <div className="app-shell">
@@ -160,14 +173,21 @@ const App: React.FC = () => {
               type="button"
               onClick={handleConnect}
               className="button button--primary"
-              disabled={status.status === 'connecting'}
+              disabled={connectDisabled}
             >
               Connect
             </button>
-            <button type="button" onClick={handleDisconnect} className="button" disabled={status.status === 'disconnected'}>
+            <button type="button" onClick={handleDisconnect} className="button" disabled={disconnectDisabled}>
               Disconnect
             </button>
           </div>
+          {!bridgeAvailable ? (
+            <div className="feedback feedback--info">
+              TCP streaming is only available when the simulator runs inside its Electron shell.{' '}
+              Start it with <code>npm run dev</code> in <code>simulator/</code> or run <code>npm run dev:both</code> from the
+              repository root to launch both apps together.
+            </div>
+          ) : null}
           <div className={`status-chip status-chip--${status.status}`}>
             <span className="status-indicator" />
             <span>{formatStatusLabel(status)}</span>

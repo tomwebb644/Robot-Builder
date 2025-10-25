@@ -5,7 +5,10 @@
   "main": "electron/main.js",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "npm run dev:studio",
+    "dev:studio": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:simulator": "npm --prefix simulator run dev",
+    "dev:both": "concurrently \"npm run dev:studio\" \"npm run dev:simulator\"",
     "build": "vite build",
     "preview": "vite preview",
     "dist": "npm run build && electron-builder --win --x64"

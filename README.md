@@ -17,13 +17,19 @@ npm install
 
 ### Development
 
-Run the renderer dev server and launch the Electron shell:
+Run the main builder renderer dev server and launch the Electron shell:
 
 ```bash
 npm run dev
 ```
 
-The command runs Vite and automatically opens the Electron window once the dev server is ready.
+The command proxies to `npm run dev:studio`, which runs Vite and automatically opens the Electron window once the dev server is ready.
+
+To launch the builder and the standalone simulator at the same time, run:
+
+```bash
+npm run dev:both
+```
 
 ### Build static assets
 
@@ -76,7 +82,7 @@ npm install
 npm run dev
 ```
 
-The dev command launches a Vite renderer on port 5183 and attaches an Electron shell. Configure the TCP bridge host/port from the sidebar and drag links in the viewport to stream joint snapshots.
+The dev command launches a Vite renderer on port 5183 and attaches an Electron shell. Configure the TCP bridge host/port from the sidebar and drag links in the viewport to stream joint snapshots. If you open the dev server URL in a regular browser tab you'll see a notice that TCP streaming is unavailable—launching the Electron shell (either with `npm run dev` inside `simulator/` or `npm run dev:both` from the repository root) is required for socket access.
 
 ## TCP Message Format
 
