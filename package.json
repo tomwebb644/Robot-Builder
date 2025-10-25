@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dist": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {
     "@react-three/drei": "^9.88.11",
@@ -24,8 +25,25 @@
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
     "electron": "^28.2.0",
+    "electron-builder": "^26.0.12",
     "typescript": "^5.4.5",
     "vite": "^5.2.8",
     "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.robotbuilder.studio",
+    "productName": "Robot Builder Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "asar": false
   }
 }

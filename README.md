@@ -31,7 +31,17 @@ The command runs Vite and automatically opens the Electron window once the dev s
 npm run build
 ```
 
-This generates the Vite production bundle in the `dist/` directory. Packaging for distribution can be added later (e.g., with `electron-builder`).
+This generates the Vite production bundle in the `dist/` directory.
+
+### Package a Windows executable
+
+Install dependencies (once) and run the dist script to produce a 64-bit Windows build:
+
+```bash
+npm run dist
+```
+
+The command chains the renderer production build and `electron-builder` packaging. The generated `.exe` installer and unpacked app live in the `release/` directory.
 
 ## Features
 
