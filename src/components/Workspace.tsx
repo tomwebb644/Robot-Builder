@@ -102,7 +102,7 @@ const LinkGroup: React.FC<{ nodeId: string }> = ({ nodeId }) => {
     const geometry: MeshGeometry = node.geometry;
     switch (geometry.kind) {
       case 'box':
-        return <boxGeometry args={[geometry.width, geometry.height, geometry.depth]} />;
+        return <boxGeometry args={[geometry.width, geometry.depth, geometry.height]} />;
       case 'cylinder':
         return <cylinderGeometry args={[geometry.radius, geometry.radius, geometry.height, 32]} />;
       case 'sphere':

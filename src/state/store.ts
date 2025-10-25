@@ -3,7 +3,7 @@ import { create } from 'zustand';
 export type MotionType = 'rotational' | 'linear';
 export type MotionAxis = 'x' | 'y' | 'z';
 export type MeshKind = 'box' | 'cylinder' | 'sphere' | 'cone' | 'capsule';
-export type NetworkSource = 'tcp' | 'ui' | 'manual' | 'simulation';
+export type NetworkSource = 'tcp' | 'ui' | 'manual' | 'simulation' | 'playback';
 
 export interface NetworkEvent {
   id: number;
@@ -296,6 +296,7 @@ export interface SceneState {
   addPose: (name?: string) => string;
   renamePose: (id: string, name: string) => void;
   removePose: (id: string) => void;
+  reorderPoses: (sourceId: string, targetId?: string) => void;
   applyPose: (id: string) => Record<string, number>;
   updateFps: (fps: number) => void;
   setTcpStatus: (status: string) => void;
@@ -907,6 +908,34 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set((state) => {
       const poses = state.poses.filter((pose) => pose.id !== id);
       if (poses.length === state.poses.length) return state;
+      return { poses };
+    });
+  },
+  reorderPoses: (sourceId, targetId) => {
+    if (!sourceId) return;
+    set((state) => {
+      if (sourceId === targetId) {
+        return state;
+      }
+      const poses = [...state.poses];
+      const fromIndex = poses.findIndex((pose) => pose.id === sourceId);
+      if (fromIndex === -1) {
+        return state;
+      }
+      const [moved] = poses.splice(fromIndex, 1);
+      if (!moved) {
+        return state;
+      }
+      if (typeof targetId === 'string') {
+        const targetIndex = poses.findIndex((pose) => pose.id === targetId);
+        if (targetIndex === -1) {
+          poses.push(moved);
+        } else {
+          poses.splice(targetIndex, 0, moved);
+        }
+      } else {
+        poses.push(moved);
+      }
       return { poses };
     });
   },

@@ -297,6 +297,22 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  cursor: grab;
+}
+
+.pose-item.dragging {
+  opacity: 0.65;
+  cursor: grabbing;
+}
+
+.pose-item.drag-over {
+  border-color: rgba(99, 102, 241, 0.65);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.35);
+  background: rgba(55, 65, 81, 0.4);
+}
+
+.pose-item[draggable='false'] {
+  cursor: default;
 }
 
 .pose-item-header {
