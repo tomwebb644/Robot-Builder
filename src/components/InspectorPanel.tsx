@@ -20,6 +20,8 @@ import { createDefaultGeometry, getGeometryBounds } from '@state/store';
 import { arrayBufferToBase64 } from '@utils/binary';
 import NumericInput from './NumericInput';
 
+const MILLIMETER_TO_METER = 0.001;
+
 const InspectorPanel: React.FC = () => {
   const selectedId = useSceneStore((state) => state.selectedId);
   const nodes = useSceneStore((state) => state.nodes);
@@ -104,9 +106,9 @@ const InspectorPanel: React.FC = () => {
         }
         const bounds = parsed.boundingBox ?? fallbackBounds;
         const size = new THREE.Vector3();
-        bounds.getSize(size);
+        bounds.getSize(size).multiplyScalar(MILLIMETER_TO_METER);
         const center = new THREE.Vector3();
-        bounds.getCenter(center);
+        bounds.getCenter(center).multiplyScalar(MILLIMETER_TO_METER);
         parsed.dispose();
         const baseBounds = {
           width: size.x || 0.3,
@@ -120,6 +122,7 @@ const InspectorPanel: React.FC = () => {
           sourceName: file.name,
           data: arrayBufferToBase64(buffer),
           scale: 1,
+          unitScale: MILLIMETER_TO_METER,
           bounds: baseBounds,
           originOffset
         };
@@ -353,9 +356,9 @@ const InspectorPanel: React.FC = () => {
           <label>
             Scale
             <NumericInput
-              step={0.05}
+              step={0.1}
               value={custom.scale}
-              precision={2}
+              precision={5}
               onValueCommit={(value) => {
                 const nextScale = Math.max(value, 0.01);
                 onGeometryChange({ ...custom, scale: nextScale });

@@ -60,6 +60,7 @@ export interface CustomGeometry {
   sourceName: string;
   data: string;
   scale: number;
+  unitScale: number;
   bounds: GeometryBounds;
   originOffset: [number, number, number];
 }
@@ -305,6 +306,8 @@ const normalizeGeometry = (geometry: any): MeshGeometry => {
       });
       const scaleValue = coerceNumber((geometry as any).scale, 1);
       const scale = Number.isFinite(scaleValue) && scaleValue > 0 ? scaleValue : 1;
+      const unitScaleValue = coerceNumber((geometry as any).unitScale, 1);
+      const unitScale = Number.isFinite(unitScaleValue) && unitScaleValue > 0 ? unitScaleValue : 1;
       const sourceName =
         typeof (geometry as any).sourceName === 'string' && (geometry as any).sourceName.trim()
           ? (geometry as any).sourceName
@@ -320,6 +323,7 @@ const normalizeGeometry = (geometry: any): MeshGeometry => {
         sourceName,
         data,
         scale,
+        unitScale,
         bounds: baseBounds,
         originOffset
       };
